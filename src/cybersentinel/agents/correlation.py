@@ -162,6 +162,16 @@ class TemporalCorrelationAgent:
         if dst_ip:
             self.dest_source_counts[dst_ip][src_ip] += 1
 
+        # Bound group lifecycle to the active replay window. Groups with no
+        # surviving member in the window are no longer considered active.
+        live_record_ids = {item["record_id"] for item in self.history}
+        stale_groups = [
+            key for key, group in self.active_groups.items()
+            if group.end_record_id not in live_record_ids
+        ]
+        for key in stale_groups:
+            del self.active_groups[key]
+
         evidence: list[str] = []
         attack_type: str | None = None
         correlated = False
@@ -240,9 +250,13 @@ class TemporalCorrelationAgent:
                 existing.end_record_id = record_id
                 if record_id not in existing.member_record_ids:
                     existing.member_record_ids.append(record_id)
+                # Keep explanations inspectable without allowing a long-running
+                # source to grow group state without bound.
+                existing.member_record_ids = existing.member_record_ids[-500:]
                 target_str = f"{dst_ip}:{dport}" if dst_ip else ""
                 if target_str and target_str not in existing.target_endpoints:
                     existing.target_endpoints.append(target_str)
+                existing.target_endpoints = existing.target_endpoints[-100:]
                 existing.evidence = evidence
 
             group = self.active_groups[group_key]
