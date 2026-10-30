@@ -34,6 +34,7 @@ ANOMALY_MODEL_PATH = MODEL_DIR / "anomaly_detection" / "model.joblib"
 METRICS_PATH = REPORTS_DIR / "metrics.json"
 SCHEMA_PATH = REPORTS_DIR / "dataset_schema.json"
 CLASS_DIST_PATH = REPORTS_DIR / "class_distribution.csv"
+DATA_QUALITY_PATH = REPORTS_DIR / "data_quality_report.json"
 
 _pipeline: Optional[CyberSentinelPipeline] = None
 
@@ -206,13 +207,28 @@ def get_dataset_summary():
             reader = csv.DictReader(f)
             distribution = list(reader)
 
+    partitions = schema.get("partitions", {})
+    if (not partitions or partitions.get("training_rows") is None) and DATA_QUALITY_PATH.exists():
+        try:
+            with open(DATA_QUALITY_PATH, "r", encoding="utf-8") as f:
+                dq = json.load(f)
+                t_rows = dq.get("training_split", {}).get("rows")
+                e_rows = dq.get("eval_split", {}).get("rows")
+                partitions = {
+                    "training_rows": t_rows,
+                    "eval_rows": e_rows,
+                    "total_rows": (t_rows + e_rows) if (t_rows is not None and e_rows is not None) else None,
+                }
+        except Exception:
+            pass
+
     return {
         "dataset_name": "CICIDS2017 Benchmark",
-        "partitions": schema.get("partitions", {
+        "partitions": partitions if partitions else {
             "training_rows": None,
             "eval_rows": None,
             "total_rows": None,
-        }),
+        },
         "schema": schema,
         "class_distribution": distribution,
     }
