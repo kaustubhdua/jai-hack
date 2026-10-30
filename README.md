@@ -1,85 +1,97 @@
 # CyberSentinel
 
-**JAI 2026 · Track 1 — Agentic AI for Cybersecurity**
+**Multi-Agent Network Intrusion Detection & Adaptive Defense**  
+JAI Agentic AI International Summit 2026 · Track 1: Agentic AI for Cybersecurity
 
-CyberSentinel is an offline network-flow intrusion-detection prototype. It analyses organiser-provided CICIDS2017-derived flow records using independent detection agents, fuses their evidence, and produces explainable simulated policy recommendations.
+CyberSentinel is an offline prototype that examines network-flow records, looks for known attack patterns and unusual behavior, and combines the evidence into an explainable recommendation. Its recommendations—`ALLOW`, `BLOCK`, or `REVIEW`—are simulated. It does not monitor a live network, launch attacks, or change a real firewall.
 
-> **Scope and safety:** Offline dataset analysis and traffic replay only. No packet sniffing, active attacks, or real firewall changes. ALLOW/BLOCK/REVIEW are simulated recommendations.
+## Project goal
 
-## Application stack
+Given a network-flow record, the system is designed to:
 
-- **Frontend:** React + TypeScript + Vite, deployed on Vercel.
-- **API:** Python + FastAPI on Vercel Functions.
-- **Authentication and run history:** Supabase Auth + Postgres with row-level security.
-- **ML training:** Python, Pandas, NumPy, scikit-learn, Joblib and PyArrow. Train locally; do not train large models inside a Vercel request.
-- **Inference status:** Agent 1, Agent 2, Agent 3 and fail-closed API integration are implemented. Model artifacts are not present in the repository; train them locally from the organiser files before inference can become ready. Official evaluation metrics remain pending.
+1. Predict one of five traffic classes.
+2. Independently score whether the flow looks unusual and identify supporting feature evidence.
+3. Combine both agents' results, including disagreements, and return a final class, evidence status, explanation, and simulated action.
 
-## Day 1 benchmark
+The prototype is intended for offline analysis and traffic replay.
 
-The organiser benchmark classes are BENIGN, BRUTE_FORCE, DOS, DDOS and PORT_SCAN. Use the exact label mapping and official train/eval files. The supplied files for the current data work are Parquet files; their `label` values already use the five canonical classes. Keep the official eval data unchanged.
+## Data
 
-## Architecture
+The challenge uses labeled CICIDS2017 network-flow records. A flow is a summary of a network conversation, with measurements such as ports, duration, packet and byte counts, timing, and traffic flags. It is not the contents of messages sent over the network.
 
-1. **Threat Detection Agent** — supervised five-class classifier; returns predicted class and model-derived confidence.
-2. **Anomaly Agent** — independent anomaly score and feature evidence; must not consume Agent 1's prediction.
-3. **Evidence Fusion Agent** — combines both outputs, records agreement/disagreement, final class, rationale and simulated action.
+The five benchmark labels are:
 
-Shared contracts are in `src/cybersentinel/contracts.py`. Pipeline orchestration is in `src/cybersentinel/pipeline.py`.
+| Label | Meaning |
+|---|---|
+| `BENIGN` | Normal traffic |
+| `BRUTE_FORCE` | Repeated attempts to guess credentials |
+| `DOS` | An attempt to overwhelm a service from one source |
+| `DDOS` | An attempt to overwhelm a service using many sources |
+| `PORT_SCAN` | Checking network ports to find available services |
 
-## Local setup
+The supplied training file has 456,737 rows and the evaluation file has 114,185 rows. The source tables contain 78 numeric measurements, a `record_id`, and a `label`. The provided evaluation rows must remain separate from training.
 
-Node.js 20+ and Python 3.10+ recommended.
+## How the system works
 
-```bash
-npm install
-cp .env.example .env.local
-npm run dev
+```mermaid
+flowchart TD
+    A[Offline network-flow record] --> P[Validate and prepare features]
+    P --> T[Threat Detection Agent<br/>class and confidence]
+    P --> N[Anomaly Agent<br/>score and feature evidence]
+    T --> F[Evidence Fusion Agent]
+    N --> F
+    F --> R[Final class, explanation,<br/>simulated action]
 ```
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local` for local auth. Never put a service-role key in frontend variables.
+### 1. Prepare the flow
 
-For Python API and ML development:
+The data-preparation code checks that the input columns and labels are expected. It excludes `record_id` from model inputs because the ID can reveal label clues. It marks infinite values and impossible negative header lengths as invalid, removes constant and exact-duplicate feature columns, and fills invalid values using medians learned from training data. It applies the same fitted rules to evaluation data and keeps every row.
+
+For the supplied data, the prepared model input has 71 numeric features plus the label. Raw and prepared challenge datasets are kept outside Git.
+
+### 2. Threat Detection Agent
+
+This supervised model predicts one of the five benchmark classes and returns a confidence value. The code includes a Random Forest baseline and an optional XGBoost backend, with class-aware training to account for uneven class counts.
+
+The returned confidence is the model's highest predicted class probability. It is not calibrated, so it should be treated as a useful signal rather than a guarantee.
+
+### 3. Anomaly Agent
+
+This independent Isolation Forest model learns what BENIGN training flows look like. It returns an anomaly score and, when it flags a flow, feature evidence for measurements that differ from the learned benign range. It does not use the Threat Detection Agent's prediction when scoring a flow.
+
+### 4. Evidence Fusion Agent
+
+Fusion checks whether the two agents agree. The current policy uses a classifier-confidence threshold of `0.85`:
+
+| Classifier result | Anomaly result | Evidence status | Simulated action |
+|---|---|---|---|
+| `BENIGN` with confidence at least 0.85 | Not anomalous | `AGREE` | `ALLOW` |
+| Attack class with confidence at least 0.85 | Anomalous | `AGREE` | `BLOCK` |
+| Classifier confidence below 0.85 | Any | Depends on agreement | `REVIEW` |
+| Classifier and anomaly detector disagree | Any | `DISAGREE` | `REVIEW` |
+| An agent's evidence is missing or invalid | Any | `INCOMPLETE` | `REVIEW` |
+
+These are recommendations for offline replay only. The program never applies a real network control.
+
+## Current implementation
+
+The repository contains the flow-data preparation and audit code, the five-class classifier code, the independent anomaly detector and training script, the evidence-fusion rules, pipeline orchestration, and API endpoints for single-flow and batch analysis.
+
+Model code is present, but trained model files are not included in the repository. The API stays fail-closed and reports that models are not ready until both verified model files are available. Official evaluation accuracy, macro-F1, and per-class results on the supplied evaluation file have not yet been produced. An internal report uses an incomplete training export, so it is not an official benchmark result.
+
+The data-preparation, Threat Detection training/evaluation, and anomaly-training commands accept Parquet, so the prepared files can be used directly. The Threat Detection batch-prediction command currently reads CSV.
+
+## Prepare the supplied data
+
+Install the Python package with its machine-learning dependencies:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev,ml]"
+pip install -e ".[ml]"
 ```
 
-Optional XGBoost experiment:
-
-```bash
-pip install -e ".[ml,xgboost]"
-```
-
-Run frontend build and tests:
-
-```bash
-npm run build
-pytest
-```
-
-## Agent 1 — Member 2 workstream
-
-The supervised classifier is implemented in `src/cybersentinel/agents/threat_detection/`:
-
-- `model.py` — Random Forest baseline and optional XGBoost backend, train-fitted preprocessing, model-derived confidence, versioned save/load.
-- `train.py` — organiser-label mapping validation, training and optional official validation evaluation.
-- `predict.py` — adapter preserving the main pipeline's `ThreatDetectionAgent` interface.
-- `predict_cli.py` — batch CSV predictions.
-- `evaluate.py` — accuracy, macro-F1, class-wise precision/recall/F1 and confusion matrix.
-
-Detailed instructions and commands: [`docs/AGENT1.md`](docs/AGENT1.md).
-
-The Agent 1 training and evaluation commands accept both CSV and Parquet files. The Member 1 data-preparation tool reads the supplied Parquet files and writes prepared Parquet files, so those prepared outputs can be passed directly to Agent 1 training. Batch prediction CLI currently reads CSV.
-
-If source labels are not already the five canonical classes, pass `--label-map` with the exact organiser-provided JSON mapping. The software deliberately refuses to guess mappings. The official eval file is evaluation-only and must never be used to fit preprocessing or the classifier.
-
-## Dataset handling — Member 1 workstream
-
-The inspected files contain 456,737 training rows and 114,185 eval rows, with 78 numeric measurements, `record_id`, and `label`. The audit found no null or infinite values and no duplicate full rows or IDs. It also found class imbalance, repeated feature vectors across splits, sequential-ID leakage risk, and a small number of impossible negative header lengths. Full findings and limitations are in [`docs/data-intelligence.md`](docs/data-intelligence.md).
-
-Place the organiser files locally under `data/raw/` (this directory is git-ignored), then run:
+Keep the organizer-provided files locally, then run the data preparation command:
 
 ```bash
 python -m cybersentinel.data.cleaning \
@@ -88,51 +100,12 @@ python -m cybersentinel.data.cleaning \
   --out-dir data/processed
 ```
 
-The preprocessor learns feature selection and fill values from training only, excludes `record_id` from model inputs, preserves every row, and applies the same rules to eval. The output and fitted preprocessing state go under `data/processed/`, which is git-ignored. Never commit raw or processed challenge data unless organisers explicitly permit redistribution.
+The command writes prepared Parquet files, fitted preprocessing state, and a dataset profile to `data/processed/`. These generated files and the raw challenge data should not be committed to the repository.
 
-## Train, evaluate and run the agents
+## API behavior
 
-After preparing the organiser Parquet files with the Member 1 command above, train the agents locally:
+The FastAPI service provides health and model-status endpoints, plus single-flow and batch analysis endpoints. Analysis requires both trained model files. If either file is missing or cannot be loaded, the service returns `MODEL_NOT_READY` instead of producing a prediction.
 
-```bash
-python -m cybersentinel.agents.threat_detection.train \\
-  --train data/processed/training_prepared.parquet \\
-  --label-column label \\
-  --model-out models/threat_detection/model.joblib \\
-  --report-out reports/generated/agent1-training.json
+## Evaluation
 
-python scripts/train_anomaly.py \\
-  --train data/processed/training_prepared.parquet \\
-  --model-out models/anomaly_detection/model.joblib \\
-  --report-out reports/generated/agent2-training.json
-```
-
-Evaluate both models on the untouched official evaluation split only after training:
-
-```bash
-python scripts/evaluate_benchmark.py \\
-  --eval data/processed/eval_prepared.parquet \\
-  --threat-model models/threat_detection/model.joblib \\
-  --anomaly-model models/anomaly_detection/model.joblib \\
-  --output reports/generated/official-evaluation.json
-```
-
-The evaluation command reports measured five-class accuracy, macro-F1, per-class metrics, confusion matrix, anomaly false-positive rate/attack recall, inference timings and a sampled fusion decision distribution. Fusion decision counts are not classification accuracy. Generated models, datasets and reports remain local and git-ignored. Only after artifacts have been verified and securely made available to the deployment should `/api/health` report `model_ready: true`.
-
-## Supabase and Vercel
-
-The `analysis_runs` table stores per-user run metadata and measured metrics only. RLS restricts access to the authenticated row owner. Raw flow records and datasets are not stored in Supabase.
-
-The Python API is in `api/index.py`. `GET /api/health` reports service readiness. `POST /api/analyze` remains fail-closed with `MODEL_NOT_READY` until the complete real inference pipeline and model artifacts are integrated.
-
-## Metrics and disclosure
-
-Report measured accuracy, macro-F1, per-class precision/recall/F1, confusion matrix, data cleaning, split strategy and limitations. Never publish invented scores. Fit preprocessing on training data only. Disclose datasets, libraries, AI assistance and reused boilerplate as required by the hackathon rulebook.
-
-## Current status
-
-- **Member 1 data audit and preprocessing:** completed for the supplied Parquet files; code and aggregate findings are merged in [PR #6](https://github.com/kaustubhdua/jai-hack/pull/6). No challenge rows or fitted values are committed.
-- **Agent 1 software:** implemented and merged in [PR #5](https://github.com/kaustubhdua/jai-hack/pull/5). It has not yet produced official benchmark metrics on the supplied files.
-- **Agent 2 anomaly detector:** Isolation Forest baseline, benign-only training, persisted threshold and feature evidence are implemented; real organiser-data training is pending.
-- **Evidence fusion:** deterministic, fail-safe evidence fusion and orchestration are merged; focused policy tests are included.
-- **Official evaluation and submission:** benchmark accuracy/macro-F1 and API submission are still pending. The API remains fail-closed until both model artifacts are trained and deployed.
+When the complete pipeline is trained, evaluate it on the untouched official evaluation split. Report overall accuracy, macro-F1, per-class precision/recall/F1, and a confusion matrix. Macro-F1 is especially useful when some classes have many fewer examples than others. Do not present internal or incomplete-data results as official benchmark performance.
