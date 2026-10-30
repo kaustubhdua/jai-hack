@@ -2,6 +2,36 @@
 
 This working Q&A summarizes what is complete in the repository and what was completed using the organizer files provided locally. It is **not** an official organizer form. Answers below distinguish measured dataset facts from model results that have not yet been produced.
 
+## What data was processed?
+
+### 1. Which files went through preprocessing?
+
+The two Parquet tables supplied for this work: `training/flows.parquet` and `eval/flows.parquet`. Together they contain **570,922 flow records**. These are summaries of network conversations, not raw packet captures or message contents.
+
+### 2. What does one row describe?
+
+One row describes one network flow: measurements such as destination port, duration, packet counts, byte counts, packet timing, and traffic flags, plus the flow's answer in `label`.
+
+### 3. Which columns are used as model input?
+
+There are 78 numeric measurements in the source. The prepared files contain 71 numeric measurements after removing three always-zero columns and four exact duplicate columns. `record_id` is omitted from model input because it gives away label clues. `label` remains in the prepared table as the answer column, not as an input feature.
+
+### 4. What happened to the rows?
+
+No rows were removed. The prepared training file still has 456,737 rows; the prepared eval file still has 114,185 rows, in their original order. Repeated measurement patterns were reported but kept, including those shared between training and eval.
+
+### 5. What values were changed?
+
+The original files had no null or infinite values. A few header-length values were negative, which is impossible for a length. The preprocessor marks those as invalid and fills them using the middle value (median) learned from training. If missing or infinite values appear in a future file, the same code converts them to missing and uses the saved training medians.
+
+### 6. Were training and eval treated the same way?
+
+The training file is used to decide which columns to keep and to calculate fill values and optional scaling settings. Eval receives those exact same decisions and values. Eval is not used to fit preprocessing. All official eval rows are retained; invalid values in them receive the same training-based cleaning as any other row.
+
+### 7. Where are the prepared files?
+
+The generated files are local: `training_prepared.parquet`, `eval_prepared.parquet`, `preprocessing_state.json`, and `dataset_profile.json` under the task's `outputs/prepared/` folder. The code in GitHub writes equivalent generated files to `data/processed/`, which is git-ignored. No challenge rows or fitted values were uploaded.
+
 ## Questions and answers
 
 ### 1. What is the project and challenge scope?
