@@ -22,3 +22,12 @@ python scripts/train_anomaly.py \
 - **Benign False Positive Rate (FPR):** 0.958% (< 1.0% operational target).
 - **Attack Anomaly Recall:** 11.71% (identifies high-volume / destructive outlier flows).
 - **Inference Latency:** ~0.040 ms/flow.
+
+
+## Score semantics and validation threshold
+
+The public `anomaly_score` is the **raw scikit-learn IsolationForest `decision_function` value**. Higher values are more normal; lower values are more anomalous. It is not a probability and is not constrained to 0–1. The detector flags a flow when `anomaly_score < threshold`.
+
+The fit-time threshold is a benign-training 1st-percentile fallback. For a competition run, call `calibrate_threshold(validation_features, validation_labels, max_benign_fpr=...)` using a separate labelled validation partition, record the returned benign false-positive rate and attack recall, then persist the calibrated artifact. Validation labels are used only for threshold selection and metrics; per-flow scoring does not read labels. Never calibrate on hidden evaluation records.
+
+Feature evidence is structured: feature name, observed value, benign q01/median/q99, IQR deviation strength, and a note that statistical deviation is not proof of maliciousness.

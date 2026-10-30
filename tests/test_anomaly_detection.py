@@ -85,3 +85,23 @@ def test_anomaly_score_contract_is_raw_and_evidence_is_structured():
     assert result.evidence
     assert isinstance(result.evidence[0], dict)
     assert {"feature", "observed_value", "baseline_q01", "baseline_q99"}.issubset(result.evidence[0])
+
+
+def test_validation_threshold_calibration_respects_benign_fpr_limit():
+    train = benign_sample(rows=300)
+    agent = AnomalyDetectionAgent().fit(train)
+    validation_benign = benign_sample(rows=80)
+    validation_attack = pd.DataFrame({
+        "Destination Port": np.full(20, 65500.0),
+        "Flow Duration": np.full(20, 9_000_000.0),
+        "Total Fwd Packets": np.full(20, 50000.0),
+        "Flow Packets/s": np.full(20, 900000.0),
+        "Flow Bytes/s": np.full(20, 90000000.0),
+    })
+    validation = pd.concat([validation_benign, validation_attack], ignore_index=True)
+    labels = ["BENIGN"] * len(validation_benign) + ["DOS"] * len(validation_attack)
+    metrics = agent.calibrate_threshold(validation, labels, max_benign_fpr=0.05)
+    assert metrics["benign_false_positive_rate"] <= 0.05
+    assert 0.0 <= metrics["attack_recall"] <= 1.0
+    assert agent.metadata["threshold_selection_uses_labels"] is True
+    assert agent.metadata["labels_used_during_scoring"] is False
