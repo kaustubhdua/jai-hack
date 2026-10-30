@@ -111,14 +111,21 @@ class ThreatDetectionModel:
         return self
 
     def _ready(self):
-        if any(x is None for x in (self.estimator, self.imputer, self.label_encoder)):
+        if self.estimator is None:
             raise RuntimeError("Threat detection model is not trained or loaded.")
 
     def predict_frame(self, features: pd.DataFrame) -> list[dict[str, Any]]:
         self._ready()
         x = numeric_features(features).reindex(columns=self.feature_columns)
-        probabilities = self.estimator.predict_proba(self.imputer.transform(x))
-        classes = self.label_encoder.inverse_transform(np.asarray(self.estimator.classes_, dtype=int))
+        if self.imputer is not None:
+            x_mat = self.imputer.transform(x)
+        else:
+            x_mat = x.fillna(0.0).to_numpy()
+        probabilities = self.estimator.predict_proba(x_mat)
+        if self.label_encoder is not None:
+            classes = self.label_encoder.inverse_transform(np.asarray(self.estimator.classes_, dtype=int))
+        else:
+            classes = np.asarray(self.estimator.classes_)
         results = []
         for row in probabilities:
             index = int(np.argmax(row))
@@ -157,9 +164,11 @@ class ThreatDetectionModel:
         payload = joblib.load(path)
         if payload.get("artifact_format_version") != ARTIFACT_FORMAT_VERSION:
             raise ValueError("Unsupported or incompatible model artifact version.")
-        instance = cls(backend=payload["backend"], **payload["config"])
-        instance.estimator, instance.imputer = payload["estimator"], payload["imputer"]
-        instance.label_encoder = payload["label_encoder"]
+        config = payload.get("config", {})
+        instance = cls(backend=payload.get("backend", "random_forest"), **config)
+        instance.estimator = payload["estimator"]
+        instance.imputer = payload.get("imputer")
+        instance.label_encoder = payload.get("label_encoder")
         instance.feature_columns = list(payload["feature_columns"])
-        instance.metadata = dict(payload["metadata"])
+        instance.metadata = dict(payload.get("metadata", {}))
         return instance
