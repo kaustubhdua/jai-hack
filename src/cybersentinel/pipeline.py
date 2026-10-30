@@ -23,7 +23,7 @@ class CyberSentinelPipeline:
         self.anomaly_agent = anomaly_agent
         self.fusion_agent = fusion_agent or EvidenceFusionAgent()
 
-    def analyze(self, flow: dict[str, Any]) -> FusionResult:
+    def analyze(self, flow: dict[str, Any]) -> dict[str, Any]:
         started = time.perf_counter()
         if not isinstance(flow, dict) or not flow:
             return self.fusion_agent.fuse(
