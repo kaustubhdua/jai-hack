@@ -105,6 +105,8 @@ class AnomalyDetectionAgent:
             "feature_count": len(self.feature_columns),
             "feature_columns": self.feature_columns,
             "threshold_method": "1st percentile of benign training decision_function scores",
+            "score_definition": "raw sklearn IsolationForest.decision_function; larger is more normal, lower is more anomalous",
+            "score_is_probability": False,
             "training_scope": "benign rows from training partition only",
         }
         return self
@@ -113,7 +115,8 @@ class AnomalyDetectionAgent:
         raw = _numeric_frame(pd.DataFrame([flow]))
         return raw.reindex(columns=self.feature_columns)
 
-    def _evidence(self, flow: dict[str, Any]) -> list[str]:
+    def _evidence(self, flow: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return inspectable deviations; these are indicators, not proof of attack."""
         deviations = []
         for col, profile in self.profiles.items():
             if col not in flow:
@@ -126,14 +129,23 @@ class AnomalyDetectionAgent:
                 continue
             if value < profile["q01"] or value > profile["q99"]:
                 strength = abs(value - profile["median"]) / profile["iqr"]
-                deviations.append((col, strength))
-        deviations.sort(key=lambda item: item[1], reverse=True)
-        result = []
-        for col, _ in deviations[:5]:
-            result.append(FEATURE_EVIDENCE_MAP.get(
-                col, "unusual_" + col.casefold().replace(" ", "_").replace("/", "_per_")
-            ))
-        return result
+                deviations.append((col, value, strength, profile))
+        deviations.sort(key=lambda item: item[2], reverse=True)
+        return [
+            {
+                "feature": col,
+                "evidence_code": FEATURE_EVIDENCE_MAP.get(
+                    col, "unusual_" + col.casefold().replace(" ", "_").replace("/", "_per_")
+                ),
+                "observed_value": float(value),
+                "baseline_q01": float(profile["q01"]),
+                "baseline_median": float(profile["median"]),
+                "baseline_q99": float(profile["q99"]),
+                "deviation_strength_iqr": float(strength),
+                "interpretation": "statistical deviation from benign training baseline; not proof of malicious activity",
+            }
+            for col, value, strength, profile in deviations[:5]
+        ]
 
     def score(self, flow: dict[str, Any]) -> AnomalyDetectionResult:
         if self.estimator is None or self.imputer is None or self.threshold is None:
