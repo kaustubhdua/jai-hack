@@ -108,7 +108,7 @@ class ThreatDetectionModel:
             "feature_count": len(self.feature_columns), "feature_columns": self.feature_columns,
             "excluded_identifier_columns": sorted(DEFAULT_DROP_COLUMNS),
             "random_state": self.random_state,
-            "confidence_definition": "maximum temperature-scaled predict_proba value; temperature scaling must be fitted on held-out labelled validation data",
+            "confidence_definition": "maximum predict_proba value when temperature=1; temperature-scaled value after held-out validation calibration",
             "confidence_calibrated": False,
             "calibration_temperature": 1.0,
         }

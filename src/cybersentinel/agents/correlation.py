@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict, deque
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 import pandas as pd
 

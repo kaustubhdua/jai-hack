@@ -109,7 +109,7 @@ class ReplayEngine:
         dports = df["Destination Port"].fillna(0).astype(int).tolist() if "Destination Port" in df.columns else [0] * total_rows
 
         src_ip_col = next(
-            (column for column in ("source_ip", "Source IP", "src_ip", "src") if column in df.columns),
+            (column for column in ("source_ip", "Source IP", "Source_IP", "src_ip", "src") if column in df.columns),
             None,
         )
         flow_records = df.to_dict(orient="records")
