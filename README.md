@@ -135,6 +135,28 @@ The evaluation output contains measured classifier metrics, anomaly false-positi
 
 The FastAPI service provides health and model-status endpoints, plus single-flow and batch analysis endpoints. Analysis requires both trained model files. If either file is missing or cannot be loaded, the service returns `MODEL_NOT_READY` instead of producing a prediction.
 
+## Data, software, and AI disclosures
+
+### Dataset
+
+The network-flow data was supplied for the challenge and is based on CIC-IDS2017. Dataset information is available from the [Canadian Institute for Cybersecurity](https://www.unb.ca/cic/datasets/ids-2017.html). The dataset paper is:
+
+Sharafaldin, Iman, Arash Habibi Lashkari, and Ali A. Ghorbani. “Toward Generating a New Intrusion Detection Dataset and Intrusion Traffic Characterization.” *Proceedings of the 4th International Conference on Information Systems Security and Privacy (ICISSP 2018)*, pp. 108–116. [DOI: 10.5220/0006639801080116](https://doi.org/10.5220/0006639801080116).
+
+Raw challenge records and generated model artifacts are kept out of this repository.
+
+### Third-party software
+
+- **Data and machine learning:** NumPy, pandas, scikit-learn, Joblib, PyArrow, and optional XGBoost.
+- **API:** FastAPI and Pydantic.
+- **Web console:** React, TypeScript, Vite, PapaParse, Lucide React, and Supabase JavaScript client.
+
+The exact dependency declarations are in `pyproject.toml` and `package.json`.
+
+### AI assistance
+
+OpenAI Codex was used during development to assist with code and documentation authoring, revision, and repository review. Project contributors should review and understand all submitted work and disclose any additional AI tools they used.
+
 ## Evaluation
 
 When the complete pipeline is trained, evaluate it on the untouched official evaluation split. Report overall accuracy, macro-F1, per-class precision/recall/F1, and a confusion matrix. Macro-F1 is especially useful when some classes have many fewer examples than others. Do not present internal or incomplete-data results as official benchmark performance.
