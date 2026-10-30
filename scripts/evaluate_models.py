@@ -111,9 +111,9 @@ def evaluate_all():
 
     # Metadata from training
     a1_meta = agent1.model.metadata
-    train_time_a1 = a1_meta.get("train_duration_seconds", 42.68)
+    train_time_a1 = a1_meta.get("train_duration_seconds")
     a2_meta = agent2.metadata
-    train_time_a2 = a2_meta.get("fit_duration_seconds", 4.99)
+    train_time_a2 = a2_meta.get("fit_duration_seconds")
 
     metrics_payload = {
         "evaluation_dataset": {
