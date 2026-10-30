@@ -48,6 +48,7 @@ class ThreatDetectionModel:
         self.n_estimators, self.max_depth = int(n_estimators), max_depth
         self.min_samples_leaf, self.n_jobs = int(min_samples_leaf), int(n_jobs)
         self.estimator = self.imputer = self.label_encoder = None
+        self.calibration_temperature = 1.0
         self.feature_columns: list[str] = []
         self.metadata: dict[str, Any] = {}
 
@@ -98,6 +99,7 @@ class ThreatDetectionModel:
             classifier.fit(x_ready, y_encoded,
                            sample_weight=compute_sample_weight("balanced", y_encoded))
         self.estimator = classifier
+        self.calibration_temperature = 1.0
         counts = y.value_counts().reindex(BENCHMARK_CLASSES, fill_value=0)
         self.metadata = {
             "artifact_format_version": ARTIFACT_FORMAT_VERSION, "backend": self.backend,
@@ -106,9 +108,64 @@ class ThreatDetectionModel:
             "feature_count": len(self.feature_columns), "feature_columns": self.feature_columns,
             "excluded_identifier_columns": sorted(DEFAULT_DROP_COLUMNS),
             "random_state": self.random_state,
-            "confidence_definition": "maximum predict_proba class probability; not calibrated",
+            "confidence_definition": "maximum temperature-scaled predict_proba value; temperature scaling must be fitted on held-out labelled validation data",
+            "confidence_calibrated": False,
+            "calibration_temperature": 1.0,
         }
         return self
+
+    def calibrate_confidence(self, validation_features: pd.DataFrame, validation_labels) -> dict[str, float]:
+        """Fit scalar temperature scaling on a separate labelled validation partition."""
+        self._ready()
+        from scipy.optimize import minimize_scalar
+
+        x = numeric_features(validation_features).reindex(columns=self.feature_columns)
+        labels = pd.Series(validation_labels).astype("string").str.strip()
+        if len(x) != len(labels):
+            raise ValueError("Validation features and labels must have equal lengths.")
+        if labels.isna().any() or (labels == "").any():
+            raise ValueError("Validation labels contain missing or empty values.")
+        unknown = sorted(set(labels.astype(str).unique()) - set(BENCHMARK_CLASSES))
+        if unknown:
+            raise ValueError(f"Validation labels outside the five benchmark classes: {unknown}")
+        missing = sorted(set(BENCHMARK_CLASSES) - set(labels.astype(str).unique()))
+        if missing:
+            raise ValueError(f"Calibration validation data must contain all five classes; missing: {missing}")
+
+        encoded = self.label_encoder.transform(labels.astype(str))
+        probabilities = np.asarray(
+            self.estimator.predict_proba(self.imputer.transform(x)), dtype=float
+        )
+        if probabilities.shape[1] != len(self.label_encoder.classes_):
+            raise ValueError("Model probability columns do not match the fitted label encoder.")
+        eps = np.finfo(float).eps
+        logits = np.log(np.clip(probabilities, eps, 1.0))
+
+        def nll(log_temperature: float) -> float:
+            temperature = float(np.exp(log_temperature))
+            scaled = logits / temperature
+            scaled -= scaled.max(axis=1, keepdims=True)
+            exp_values = np.exp(scaled)
+            calibrated = exp_values / exp_values.sum(axis=1, keepdims=True)
+            return float(-np.log(np.clip(calibrated[np.arange(len(encoded)), encoded], eps, 1.0)).mean())
+
+        result = minimize_scalar(nll, bounds=(np.log(0.05), np.log(20.0)), method="bounded")
+        if not result.success or not np.isfinite(result.fun):
+            raise RuntimeError("Temperature calibration failed to converge.")
+        self.calibration_temperature = float(np.exp(result.x))
+        self.metadata.update({
+            "confidence_definition": "maximum temperature-scaled predict_proba value",
+            "confidence_calibrated": True,
+            "calibration_method": "scalar_temperature_scaling",
+            "calibration_temperature": self.calibration_temperature,
+            "calibration_validation_rows": int(len(labels)),
+            "calibration_validation_classes": sorted(set(labels.astype(str).unique())),
+            "calibration_validation_nll": float(result.fun),
+            "calibration_uses_held_out_labels": True,
+        })
+        return {"temperature": self.calibration_temperature,
+                "validation_negative_log_likelihood": float(result.fun),
+                "validation_rows": float(len(labels))}
 
     def _ready(self):
         if any(x is None for x in (self.estimator, self.imputer, self.label_encoder)):
@@ -117,7 +174,12 @@ class ThreatDetectionModel:
     def predict_frame(self, features: pd.DataFrame) -> list[dict[str, Any]]:
         self._ready()
         x = numeric_features(features).reindex(columns=self.feature_columns)
-        probabilities = self.estimator.predict_proba(self.imputer.transform(x))
+        probabilities = np.asarray(self.estimator.predict_proba(self.imputer.transform(x)), dtype=float)
+        temperature = max(float(self.calibration_temperature), 1e-6)
+        logits = np.log(np.clip(probabilities, np.finfo(float).eps, 1.0)) / temperature
+        logits -= logits.max(axis=1, keepdims=True)
+        exp_values = np.exp(logits)
+        probabilities = exp_values / exp_values.sum(axis=1, keepdims=True)
         classes = self.label_encoder.inverse_transform(np.asarray(self.estimator.classes_, dtype=int))
         results = []
         for row in probabilities:
@@ -138,6 +200,7 @@ class ThreatDetectionModel:
             "estimator": self.estimator, "imputer": self.imputer,
             "label_encoder": self.label_encoder, "feature_columns": self.feature_columns,
             "metadata": self.metadata,
+            "calibration_temperature": self.calibration_temperature,
             "config": {"random_state": self.random_state, "n_estimators": self.n_estimators,
                        "max_depth": self.max_depth, "min_samples_leaf": self.min_samples_leaf,
                        "n_jobs": self.n_jobs},
@@ -162,4 +225,5 @@ class ThreatDetectionModel:
         instance.label_encoder = payload["label_encoder"]
         instance.feature_columns = list(payload["feature_columns"])
         instance.metadata = dict(payload["metadata"])
+        instance.calibration_temperature = float(payload.get("calibration_temperature", 1.0))
         return instance
