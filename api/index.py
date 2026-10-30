@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from cybersentinel.contracts import FusionResult
@@ -23,14 +22,6 @@ app = FastAPI(
     title="CyberSentinel API",
     version="1.0.0",
     description="Offline network-flow analysis API with three-agent evidence fusion and simulated defense policies.",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 # Paths to verified artifacts
@@ -116,15 +107,15 @@ def models_status():
                 "role": "Supervised 5-class classification",
                 "backend": a1_meta.get("backend", "RandomForest"),
                 "classes": ["BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN"],
-                "feature_count": a1_meta.get("feature_count", 71),
-                "training_rows": a1_meta.get("training_rows", 456737),
+                "feature_count": a1_meta.get("feature_count"),
+                "training_rows": a1_meta.get("training_rows"),
             },
             "anomaly_detection": {
                 "name": "Anomaly Detection Agent",
                 "role": "Unsupervised baseline deviation scoring",
                 "algorithm": "IsolationForest",
                 "threshold": pipeline.anomaly_agent.threshold,
-                "benign_training_rows": a2_meta.get("training_rows", 240000),
+                "benign_training_rows": a2_meta.get("training_rows"),
             },
             "evidence_fusion": {
                 "name": "Evidence Fusion Agent",
@@ -217,11 +208,11 @@ def get_dataset_summary():
 
     return {
         "dataset_name": "CICIDS2017 Benchmark",
-        "partitions": {
-            "training_rows": 456737,
-            "eval_rows": 114185,
-            "total_rows": 570922,
-        },
+        "partitions": schema.get("partitions", {
+            "training_rows": None,
+            "eval_rows": None,
+            "total_rows": None,
+        }),
         "schema": schema,
         "class_distribution": distribution,
     }
@@ -238,11 +229,11 @@ def get_history(limit: int = Query(default=10, ge=1, le=100)):
 
     return {
         "recent_evaluation": {
-            "evaluated_at": "Official Holdout Evaluation",
-            "eval_records": metrics.get("evaluation_dataset", {}).get("total_records", 114185),
-            "accuracy": metrics.get("agent_1_threat_detection", {}).get("overall_accuracy", 0.999965),
-            "macro_f1": metrics.get("agent_1_threat_detection", {}).get("macro_f1", 0.999971),
-            "benign_fpr": metrics.get("agent_1_threat_detection", {}).get("false_positive_rate_benign", 0.0),
-            "status": "verified",
+            "evaluated_at": metrics.get("evaluation_dataset", {}).get("evaluated_at"),
+            "eval_records": metrics.get("evaluation_dataset", {}).get("total_records"),
+            "accuracy": metrics.get("agent_1_threat_detection", {}).get("overall_accuracy"),
+            "macro_f1": metrics.get("agent_1_threat_detection", {}).get("macro_f1"),
+            "benign_fpr": metrics.get("agent_1_threat_detection", {}).get("false_positive_rate_benign"),
+            "status": "reported" if metrics else "not_available",
         }
     }
