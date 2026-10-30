@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict, deque
 import hashlib
+from datetime import datetime, timezone
 from typing import Any
+import pandas as pd
 
 from cybersentinel.contracts import CorrelationGroup, CorrelationResult
 
@@ -15,8 +17,11 @@ from cybersentinel.contracts import CorrelationGroup, CorrelationResult
 class TemporalCorrelationAgent:
     """Correlate suspicious network flows across sliding time or sequence windows."""
 
-    def __init__(self, window_size: int = 150):
+    def __init__(self, window_size: int = 150, window_seconds: int = 300):
+        if window_size < 1 or window_seconds < 1:
+            raise ValueError("window_size and window_seconds must be positive")
         self.window_size = window_size
+        self.window_seconds = window_seconds
         self.history: deque[dict[str, Any]] = deque()
         self.source_port_counts: defaultdict[str, Counter[int]] = defaultdict(Counter)
         self.dest_source_counts: defaultdict[str, Counter[str]] = defaultdict(Counter)
@@ -82,6 +87,36 @@ class TemporalCorrelationAgent:
             dport = 0
         return src_ip, dst_ip or "", dport
 
+    @staticmethod
+    def _parse_timestamp(flow: dict[str, Any]) -> datetime | None:
+        for key in ("Timestamp", "timestamp", "Flow Start", "flow_start", "start_time"):
+            value = flow.get(key)
+            if value is None or str(value).strip() == "":
+                continue
+            try:
+                parsed = pd.to_datetime(value, utc=True, errors="coerce")
+                if pd.isna(parsed):
+                    continue
+                return parsed.to_pydatetime()
+            except (TypeError, ValueError, OverflowError):
+                continue
+        return None
+
+    def _evict_oldest(self) -> None:
+        old = self.history.popleft()
+        old_src, old_dst, old_dport = old["src_ip"], old["dst_ip"], old["dport"]
+        self.source_port_counts[old_src][old_dport] -= 1
+        if self.source_port_counts[old_src][old_dport] <= 0:
+            del self.source_port_counts[old_src][old_dport]
+        if not self.source_port_counts[old_src]:
+            del self.source_port_counts[old_src]
+        if old_dst:
+            self.dest_source_counts[old_dst][old_src] -= 1
+            if self.dest_source_counts[old_dst][old_src] <= 0:
+                del self.dest_source_counts[old_dst][old_src]
+            if not self.dest_source_counts[old_dst]:
+                del self.dest_source_counts[old_dst]
+
     def correlate(
         self,
         record_id: str | int,
@@ -91,6 +126,7 @@ class TemporalCorrelationAgent:
     ) -> CorrelationResult:
         """Analyze a flow in sequence and correlate with recent sliding-window activity."""
         src_ip, dst_ip, dport = self.extract_endpoints(flow)
+        event_time = self._parse_timestamp(flow)
         if not src_ip:
             return CorrelationResult(
                 correlated=False,
@@ -98,25 +134,19 @@ class TemporalCorrelationAgent:
                 message="No native source IP or complete TCP-stack fingerprint is available for endpoint correlation.",
             )
 
-        # Evict oldest item if sliding window is full
-        if len(self.history) >= self.window_size:
-            old = self.history.popleft()
-            old_src = old["src_ip"]
-            old_dst = old["dst_ip"]
-            old_dport = old["dport"]
-
-            self.source_port_counts[old_src][old_dport] -= 1
-            if self.source_port_counts[old_src][old_dport] <= 0:
-                del self.source_port_counts[old_src][old_dport]
-            if not self.source_port_counts[old_src]:
-                del self.source_port_counts[old_src]
-
-            if old_dst:
-                self.dest_source_counts[old_dst][old_src] -= 1
-                if self.dest_source_counts[old_dst][old_src] <= 0:
-                    del self.dest_source_counts[old_dst][old_src]
-                if not self.dest_source_counts[old_dst]:
-                    del self.dest_source_counts[old_dst]
+        # Prefer an elapsed-time window when timestamps are present; retain a hard
+        # record-count cap as a memory bound and fallback for timestamp-less datasets.
+        if event_time is not None:
+            while self.history:
+                oldest_time = self.history[0].get("timestamp")
+                if oldest_time is None:
+                    break
+                age = (event_time - oldest_time).total_seconds()
+                if age <= self.window_seconds:
+                    break
+                self._evict_oldest()
+        while len(self.history) >= self.window_size:
+            self._evict_oldest()
 
         # Track in sliding window structures
         self.history.append({
@@ -125,7 +155,8 @@ class TemporalCorrelationAgent:
             "dst_ip": dst_ip,
             "dport": dport,
             "threat_class": threat_class,
-            "confidence": confidence or 0.0,
+            "confidence": confidence if confidence is not None else 0.0,
+            "timestamp": event_time,
         })
         self.source_port_counts[src_ip][dport] += 1
         if dst_ip:
@@ -142,7 +173,7 @@ class TemporalCorrelationAgent:
             correlated = True
             attack_type = "PORT_SCAN"
             evidence.append(
-                f"Source {src_ip} probed {len(target_ports)} distinct ports within {self.window_size}-flow window."
+                f"Source {src_ip} probed {len(target_ports)} distinct ports within configured correlation window ({self.window_seconds}s when timestamps are present; otherwise {self.window_size} records)."
             )
 
         # Check Pattern 2: Distributed Denial of Service (many sources targeting single destination)
