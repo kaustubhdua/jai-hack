@@ -1,20 +1,21 @@
 # CyberSentinel Agent 1 — supervised threat detection
 
-Baseline artifact generated with scikit-learn `HistGradientBoostingClassifier`.
+Reproducible scikit-learn baseline using `HistGradientBoostingClassifier`.
 
-- Input: uploaded `train (2).csv` (288,750 rows; 75 numeric features after filtering).
-- Preprocessing: numeric coercion, infinities to missing, median imputation; excludes `label` and `record_id`.
-- Class imbalance: balanced sample weights.
-- Evaluation: stratified random 80/20 internal split.
-- Internal holdout: accuracy 1.000, macro-F1 1.000 (57,750 rows).
+- Training input: user-provided `train (2).csv`, 288,750 rows (incomplete vs. official training count 456,737).
+- Features: 75 numeric flow features; excludes `label`, `record_id`, all-null and constant columns.
+- Preprocessing: numeric coercion, infinities to missing, median imputation; balanced sample weights.
+- Validation: 80/20 `GroupShuffleSplit` grouped by exact feature-row hash, preventing identical feature vectors crossing partitions.
+- Internal grouped holdout: accuracy **0.999948**, macro-F1 **0.999965** (57,680 rows).
+- Duplicate feature rows: 19,294; conflicting labels among identical feature vectors: 0.
 
-## Important limitations
+These are internal metrics on an incomplete training export, not official benchmark or real-world performance. The organiser's untouched evaluation set was not available for this run.
 
-The CSV export is incomplete compared with the earlier Colab count of 456,737 training rows. The reported perfect metrics are suspicious and require duplicate/leakage investigation. They are not official evaluation results and must not be represented as real-world generalisation. Retrain using the complete official training set and evaluate once on the untouched official evaluation set before final submission.
-
-Run:
+## Run
 ```bash
+pip install pandas numpy scikit-learn joblib
 python train_agent1.py --train path/to/train.csv --out artifacts
+python predict_agent1.py --model artifacts/threat_detection_model.joblib --input flows.csv --output predictions.csv
 ```
 
-The trained `threat_detection_model.joblib` is distributed separately in the ChatGPT artifact bundle; this commit contains the reproducible trainer and report, not the binary model.
+The trained binary is supplied in the companion artifact bundle and is not committed to Git.
