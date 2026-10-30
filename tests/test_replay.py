@@ -81,3 +81,34 @@ def test_replay_causal_workflow(tmp_path):
     replay_header = sub_files["replay"].read_text().splitlines()[0]
     assert replay_header == "record_id,action,applied_policy_id"
 
+
+
+class BrokenThreatAgent:
+    def predict(self, flow):
+        return ThreatDetectionResult(predicted_class=None, confidence=None, status="error")
+
+
+class BrokenAnomalyAgent:
+    def score(self, flow):
+        return AnomalyDetectionResult(anomaly_score=None, is_anomaly=None, status="error")
+
+
+def test_replay_does_not_fabricate_benign_when_agents_fail():
+    engine = ReplayEngine(BrokenThreatAgent(), BrokenAnomalyAgent())
+    result = engine.run_replay(pd.DataFrame([{"record_id": 1, "source_ip": "192.0.2.1"}]))
+    assert result["classification_rows"][0]["predicted_class"] == ""
+    assert result["classification_rows"][0]["evidence status"] == "INCOMPLETE"
+    assert result["replay_rows"][0]["action"] == "ALLOW"
+    assert result["policy_rows"] == []
+
+
+def test_replay_never_uses_fingerprint_identity_as_source_ip_policy():
+    engine = ReplayEngine(DummyThreatAgent(), DummyAnomalyAgent())
+    df = pd.DataFrame([{
+        "record_id": 1, "Destination Port": 80,
+        "Init_Win_bytes_forward": 64240,
+        "min_seg_size_forward": 20,
+        "Fwd Header Length": 40,
+    }])
+    result = engine.run_replay(df)
+    assert result["policy_rows"] == []

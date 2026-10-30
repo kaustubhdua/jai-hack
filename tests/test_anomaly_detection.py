@@ -71,3 +71,17 @@ def test_score_frame_vectorized():
     assert len(results) == 20
     assert all(r.status == "success" for r in results)
     assert all(isinstance(r.is_anomaly, bool) for r in results)
+
+
+def test_anomaly_score_contract_is_raw_and_evidence_is_structured():
+    agent = AnomalyDetectionAgent().fit(benign_sample())
+    assert agent.metadata["score_is_probability"] is False
+    assert "decision_function" in agent.metadata["score_definition"]
+    outlier = {"Destination Port": 65500, "Flow Duration": 9_000_000,
+               "Total Fwd Packets": 50000, "Flow Packets/s": 900000,
+               "Flow Bytes/s": 90000000}
+    result = agent.score(outlier)
+    assert result.is_anomaly is True
+    assert result.evidence
+    assert isinstance(result.evidence[0], dict)
+    assert {"feature", "observed_value", "baseline_q01", "baseline_q99"}.issubset(result.evidence[0])

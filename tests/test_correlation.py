@@ -105,3 +105,22 @@ def test_ddos_convergence_requires_observed_destination_identity():
         result = agent.correlate(f"record-{index}", flow, threat_class="DDOS")
     assert result is not None
     assert result.correlated is False
+
+
+def test_timestamp_window_evicts_old_flows_by_elapsed_time():
+    agent = TemporalCorrelationAgent(window_size=100, window_seconds=60)
+    for index, port in enumerate([21, 22, 23, 24]):
+        agent.correlate(
+            f"old-{index}",
+            {"source_ip": "192.0.2.10", "Destination Port": port,
+             "Timestamp": f"2026-10-31T10:00:{index:02d}Z"},
+            threat_class="PORT_SCAN",
+        )
+    result = agent.correlate(
+        "new-flow",
+        {"source_ip": "192.0.2.10", "Destination Port": 443,
+         "Timestamp": "2026-10-31T10:05:00Z"},
+        threat_class="PORT_SCAN",
+    )
+    assert result.correlated is False
+    assert len(agent.history) == 1
