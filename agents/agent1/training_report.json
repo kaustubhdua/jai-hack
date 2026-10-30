@@ -1,30 +1,17 @@
 {
-  "dataset_file": "train (2).csv",
-  "rows_uploaded": 288750,
-  "features_used": 75,
-  "train_rows": 231000,
-  "internal_holdout_rows": 57750,
-  "training_seconds": 25.7,
-  "accuracy": 1,
-  "macro_f1": 1,
-  "class_order": [
-    "BENIGN",
-    "BRUTE_FORCE",
-    "DDOS",
-    "DOS",
-    "PORT_SCAN"
-  ],
-  "class_counts": {
-    "BENIGN": 162878,
-    "PORT_SCAN": 57600,
-    "DDOS": 57600,
-    "BRUTE_FORCE": 5537,
-    "DOS": 5135
-  },
-  "caveats": [
-    "Uploaded CSV has 288,750 rows, fewer than 456,737 reported in earlier Colab output.",
-    "Metrics are from a stratified random 80/20 split, not the organiser's untouched evaluation set.",
-    "Perfect score is suspiciously high; investigate duplicates, synthetic separability, and feature/label leakage.",
-    "Model is HistGradientBoostingClassifier, not the repository's Random Forest baseline."
-  ]
+  "dataset": "user-provided train (2).csv; incomplete export",
+  "rows": 288750,
+  "features": 75,
+  "train_rows": 231070,
+  "holdout_rows": 57680,
+  "split": "80/20 GroupShuffleSplit grouped by exact feature-row hash",
+  "duplicate_feature_rows": 19294,
+  "duplicate_feature_groups": 12725,
+  "conflicting_duplicate_feature_groups": 0,
+  "training_seconds": 25.61,
+  "accuracy": 0.9999479889042996,
+  "macro_f1": 0.9999645791949632,
+  "class_order": ["BENIGN", "BRUTE_FORCE", "DDOS", "DOS", "PORT_SCAN"],
+  "class_counts": {"BENIGN":162878,"PORT_SCAN":57600,"DDOS":57600,"BRUTE_FORCE":5537,"DOS":5135},
+  "limitations": ["Training export has 288,750 rows, fewer than official 456,737.", "Official evaluation set was unavailable; metrics are internal grouped-holdout only.", "Identical feature rows were grouped to prevent exact-duplicate leakage."]
 }
