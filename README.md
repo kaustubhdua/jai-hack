@@ -67,7 +67,7 @@ Fusion checks whether the two agents agree. The current policy uses a classifier
 |---|---|---|---|
 | `BENIGN` with confidence at least 0.85 | Not anomalous | `AGREE` | `ALLOW` |
 | Attack class with confidence at least 0.85 | Anomalous | `AGREE` | `BLOCK` |
-| Either result has lower confidence | Any | Depends on agreement | `REVIEW` |
+| Classifier confidence below 0.85 | Any | Depends on agreement | `REVIEW` |
 | Classifier and anomaly detector disagree | Any | `DISAGREE` | `REVIEW` |
 | An agent's evidence is missing or invalid | Any | `INCOMPLETE` | `REVIEW` |
 
