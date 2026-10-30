@@ -1,0 +1,123 @@
+{
+  "evaluation_dataset": {
+    "source": "Cyber/eval/flows.parquet",
+    "total_records": 114185,
+    "feature_count": 71,
+    "classes": [
+      "BENIGN",
+      "BRUTE_FORCE",
+      "DOS",
+      "DDOS",
+      "PORT_SCAN"
+    ]
+  },
+  "agent_1_threat_detection": {
+    "model_type": "RandomForestClassifier",
+    "hyperparameters": {
+      "n_estimators": 100,
+      "max_depth": 24,
+      "min_samples_leaf": 2,
+      "class_weight": "balanced_subsample"
+    },
+    "training_time_seconds": 42.68,
+    "inference_time_total_seconds": 0.8079,
+    "inference_time_per_flow_ms": 0.00708,
+    "overall_accuracy": 0.999965,
+    "macro_precision": 0.999987,
+    "macro_recall": 0.999956,
+    "macro_f1": 0.999971,
+    "false_positive_rate_benign": 0.0,
+    "false_negative_rate_attack": 7.4e-05,
+    "per_class": {
+      "BENIGN": {
+        "precision": 0.999933,
+        "recall": 1.0,
+        "f1_score": 0.999967,
+        "support": 60001
+      },
+      "BRUTE_FORCE": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 1384
+      },
+      "DOS": {
+        "precision": 1.0,
+        "recall": 0.999917,
+        "f1_score": 0.999958,
+        "support": 24000
+      },
+      "DDOS": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 14400
+      },
+      "PORT_SCAN": {
+        "precision": 1.0,
+        "recall": 0.999861,
+        "f1_score": 0.999931,
+        "support": 14400
+      }
+    },
+    "confusion_matrix": [
+      [
+        60001,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1384,
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        0,
+        23998,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        14400,
+        0
+      ],
+      [
+        2,
+        0,
+        0,
+        0,
+        14398
+      ]
+    ]
+  },
+  "agent_2_anomaly_detection": {
+    "model_type": "IsolationForest",
+    "training_time_seconds": 4.99,
+    "inference_time_total_seconds": 1.3012,
+    "inference_time_per_flow_ms": 0.0114,
+    "threshold": -0.0232,
+    "benign_false_positive_rate": 0.005167,
+    "attack_anomaly_recall": 0.057065
+  },
+  "agent_3_evidence_fusion_sample": {
+    "sample_size": 5000,
+    "actions": {
+      "ALLOW": 2663,
+      "BLOCK": 2327,
+      "REVIEW": 10
+    },
+    "evidence_status": {
+      "AGREE": 2807,
+      "DISAGREE": 2193,
+      "INCOMPLETE": 0
+    }
+  }
+}
