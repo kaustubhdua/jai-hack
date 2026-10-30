@@ -71,3 +71,19 @@ def test_record_id_is_excluded_from_classifier_features():
     features = numeric_features(frame)
     assert "record_id" not in features.columns
     assert "Flow Duration" in features.columns
+
+
+def test_validation_temperature_calibration_is_persisted(tmp_path):
+    x, y = sample_data()
+    agent = ThreatDetectionAgent().fit(x, y)
+    assert agent.model.metadata["confidence_calibrated"] is False
+    metrics = agent.model.calibrate_confidence(x, y)
+    assert metrics["temperature"] > 0
+    assert agent.model.metadata["confidence_calibrated"] is True
+    prediction = agent.predict(x.iloc[0].to_dict())
+    assert 0.0 <= prediction.confidence <= 1.0
+    artifact = tmp_path / "calibrated.joblib"
+    agent.save(artifact)
+    restored = ThreatDetectionAgent.load(artifact)
+    assert restored.model.calibration_temperature == agent.model.calibration_temperature
+    assert restored.model.metadata["confidence_calibrated"] is True

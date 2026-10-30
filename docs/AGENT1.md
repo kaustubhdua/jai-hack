@@ -75,3 +75,8 @@ python agents/agent1/predict_agent1.py \
 - Numeric flow measurements and destination ports remain eligible.
 - Missing and infinite values are median-imputed using training data statistics only.
 - Preprocessing and feature selection are fitted strictly on training data; evaluation data is strictly holdout.
+
+
+## Confidence calibration
+
+The raw Random Forest/XGBoost `predict_proba` output is not automatically calibrated. The model therefore records `confidence_calibrated=false` after ordinary training. To calibrate, call `calibrate_confidence(validation_features, validation_labels)` with a separate labelled validation partition containing all five benchmark classes. This fits scalar temperature scaling against validation negative log-likelihood, persists the temperature and validation provenance, and applies the same transformation at inference. Never use hidden evaluation labels for calibration. Report calibration status and validation metrics; a calibrated confidence remains a model estimate, not a guarantee.
