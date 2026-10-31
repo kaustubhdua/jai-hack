@@ -5,7 +5,7 @@
 - **Model:** Isolation Forest (200 trees, 50,000 max samples per tree, `n_jobs=-1`).
 - **Baseline Training Data:** `BENIGN` rows from the model-fit subset of the authorized training partition. The exact count and data hash are recorded in `reports/generated/training_manifest.json`.
 - **Independence:** Never ingests or depends on Agent 1 predictions or ground truth labels during inference.
-- **Threshold Calibration:** The raw threshold starts from the benign-training decision-function distribution. The default operating threshold is derived from the BENIGN training-score distribution. Label-based threshold tuning is disabled by default; it requires an explicitly permitted separate labelled validation file and the `--calibrate-anomaly-threshold` opt-in flag.
+- **Threshold Calibration:** The default operating threshold is derived from the BENIGN training-score distribution. Label-based threshold tuning is disabled by default; it requires an explicitly permitted separate labelled validation file and the `--calibrate-anomaly-threshold` opt-in flag.
 - **Evidence Extraction:** For flows whose raw decision-function score falls below the threshold, individual features deviating beyond $Q_{01}$ or $Q_{99}$ relative to benign training interquartile ranges are mapped to human-readable evidence tags (e.g., `unusual_packet_rate`, `abnormal_flow_duration`).
 
 ## Exported score semantics
