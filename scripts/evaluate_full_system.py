@@ -67,6 +67,8 @@ def main():
 
     if not eval_data_path.is_file():
         raise FileNotFoundError(f"Evaluation dataset missing: {eval_data_path}")
+    if not train_data_path.is_file():
+        raise FileNotFoundError(f"Training dataset missing: {train_data_path}")
     if not threat_model_path.is_file() or not anomaly_model_path.is_file():
         raise FileNotFoundError("Model artifacts missing. Ensure both A1 and A2 models are trained.")
 
@@ -136,7 +138,6 @@ def main():
     loao_report = evaluate_leave_one_attack_out(
         train_df=train_df,
         eval_df=eval_df,
-        omitted_classes=["BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN"],
         max_train_samples=80000,
     )
     save_evaluation_report("loao", loao_report, output_dir, metadata)
@@ -168,11 +169,13 @@ def main():
     temporal_report = evaluate_temporal_correlation(eval_df)
     save_evaluation_report("temporal", temporal_report, output_dir, metadata)
     t_sum = temporal_report["evaluation_summary"]
+    mean_delay = t_sum.get("mean_detection_delay_flows")
+    mean_delay_text = f"{mean_delay:.1f} flows" if mean_delay is not None else "not observed"
     logger.info(f"Total Campaigns: {t_sum['total_campaigns_detected']} | "
                 f"Campaign Precision: {t_sum['campaign_precision']:.4f} | "
                 f"DDoS: {t_sum['campaigns_by_type'].get('DDOS', 0)} | "
                 f"PortScan: {t_sum['campaigns_by_type'].get('PORT_SCAN', 0)} | "
-                f"Mean Delay: {t_sum['mean_detection_delay_flows']:.1f} flows")
+                f"Mean Delay: {mean_delay_text}")
 
     # -------------------------------------------------------------------------
     # Phase 9: Adaptive Defense Evaluation (Agent 5)
