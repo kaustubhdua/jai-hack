@@ -1,5 +1,8 @@
 # Submission Contract & Schema Compliance Report
 
+> **Historical archive — not current verification.** This file preserves an earlier run and may describe obsolete models, metrics, interfaces, or CSV schemas. Do not use it as current evidence for judging, submission, or presentation claims. Regenerate results from current `main` and authorized organizer data. The current workflow is [docs/evaluation](../../docs/evaluation.md); the current Level 2 contract is [docs/level2-brief](../../docs/level2-brief.md).
+
+
 **Output Directory:** `outputs/submission/`  
 **Files Audited:** `classification.csv`, `policy.csv`, `replay.csv`, `summary.json`, `validation_report.json`  
 **Validator:** `cybersentinel.replay.submission.SubmissionValidator`  
