@@ -1,5 +1,8 @@
 # Frontend UI/UX & Browser QA Audit
 
+> **Historical archive — not current verification.** This file preserves an earlier run and may describe obsolete models, metrics, interfaces, or CSV schemas. Do not use it as current evidence for judging, submission, or presentation claims. Regenerate results from current `main` and authorized organizer data. The current workflow is [docs/evaluation](../../docs/evaluation.md); the current Level 2 contract is [docs/level2-brief](../../docs/level2-brief.md).
+
+
 **Framework:** React 19, TypeScript 5.8, Vite 6, Tailwind CSS, Three.js  
 **Build Result:** 0 Errors, 0 Warnings, 13.95s production bundle generation  
 **Views Audited:** 11 Specialized Cyber Operations Consoles  
