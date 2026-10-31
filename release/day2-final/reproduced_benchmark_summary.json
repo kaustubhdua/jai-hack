@@ -1,7 +1,7 @@
 {
   "timestamp": "2026-10-30T17:51:32Z",
   "dataset": {
-    "path": "C:\\Users\\kaust\\OneDrive\\Desktop\\jai hack\\data\\processed\\eval_prepared.parquet",
+    "path": "data/processed/eval_prepared.parquet",
     "rows": 114185,
     "classes": {
       "BENIGN": 60001,
@@ -20,30 +20,30 @@
     "per_class": {
       "BENIGN": {
         "precision": 0.9999166749991667,
-        "recall": 1.0,
+        "recall": 1,
         "f1": 0.9999583357637472,
         "support": 60001
       },
       "BRUTE_FORCE": {
-        "precision": 1.0,
+        "precision": 1,
         "recall": 0.9992774566473989,
         "f1": 0.9996385977593061,
         "support": 1384
       },
       "DOS": {
-        "precision": 1.0,
+        "precision": 1,
         "recall": 0.9999166666666667,
         "f1": 0.9999583315971499,
         "support": 24000
       },
       "DDOS": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1,
         "support": 14400
       },
       "PORT_SCAN": {
-        "precision": 1.0,
+        "precision": 1,
         "recall": 0.9998611111111111,
         "f1": 0.9999305507326898,
         "support": 14400
@@ -108,5 +108,6 @@
       "DISAGREE": 2143,
       "INCOMPLETE": 0
     }
-  }
+  },
+  "archive_notice": "Historical local benchmark snapshot only. Not current verification of main and not a hidden-set result. Reproduce with current code and authorized data before citing."
 }
