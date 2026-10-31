@@ -9,7 +9,7 @@ import pandas as pd\nfrom types import SimpleNamespace
 from cybersentinel.evaluation.classification import evaluate_classifier
 from cybersentinel.evaluation.loao import evaluate_leave_one_attack_out
 from cybersentinel.evaluation.report import save_evaluation_report
-from cybersentinel.evaluation.temporal import evaluate_temporal_correlation
+from cybersentinel.evaluation.temporal import evaluate_temporal_correlation\nfrom cybersentinel.agents.threat_detection.model import ThreatDetectionModel
 
 
 def test_classification_report_is_json_serializable_without_cycles():
@@ -76,3 +76,16 @@ def test_temporal_evaluation_never_feeds_ground_truth_labels_to_agent():
     assert len(seen) == len(frame)
     assert report["evaluation_summary"]["correlated_flows_total"] == 0
     assert report["evaluation_summary"]["campaign_metrics_available"] is False
+
+
+def test_loao_model_can_train_on_four_known_classes_without_inventing_fifth():
+    frame = pd.DataFrame({
+        "feature_a": [0.0, 0.1, 1.0, 1.1, 2.0, 2.1, 3.0, 3.1],
+        "feature_b": [1.0, 1.1, 2.0, 2.1, 3.0, 3.1, 4.0, 4.1],
+    })
+    labels = ["BENIGN", "BENIGN", "BRUTE_FORCE", "BRUTE_FORCE", "DOS", "DOS", "DDOS", "DDOS"]
+    model = ThreatDetectionModel(n_estimators=5, allow_missing_classes=True).fit(frame, labels)
+    prediction = model.predict_one({"feature_a": 0.05, "feature_b": 1.05})
+    assert prediction["predicted_class"] in {"BENIGN", "BRUTE_FORCE", "DOS", "DDOS"}
+    assert "PORT_SCAN" in model.metadata["missing_training_classes"]
+    assert model.metadata["allow_missing_classes"] is True
