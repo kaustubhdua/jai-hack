@@ -203,3 +203,23 @@ def test_submission_validation_refuses_to_claim_valid_without_source_dataset(mon
     assert response.status_code == 200
     assert response.json()["status"] == "INPUT_DATASET_NOT_AVAILABLE"
     assert response.json()["valid"] is False
+
+
+def test_dedicated_single_flow_function_passes_request_context(monkeypatch):
+    from api.analyze.index import app as dedicated_app
+
+    monkeypatch.setattr(index, "_require_authenticated_user", lambda request: None)
+    monkeypatch.setattr(index, "get_pipeline", lambda: None)
+    response = TestClient(dedicated_app).post("/", json={"flow": {"Flow Duration": 100}})
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "MODEL_NOT_READY"
+
+
+def test_dedicated_batch_function_passes_request_context(monkeypatch):
+    from api.analyze.batch import app as dedicated_app
+
+    monkeypatch.setattr(index, "_require_authenticated_user", lambda request: None)
+    monkeypatch.setattr(index, "get_pipeline", lambda: None)
+    response = TestClient(dedicated_app).post("/", json={"flows": [{"Flow Duration": 100}]})
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "MODEL_NOT_READY"
