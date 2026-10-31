@@ -164,7 +164,7 @@ export default function App() {
     {mobileNavOpen && <button type="button" className="mobile-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
     <aside className={"sidebar" + (mobileNavOpen ? " mobile-open" : "")}>
       <div className="brand"><div className="brand-mark"><Shield size={21} /></div><span>CYBERSENTINEL</span></div>
-      <div className="workspace"><div className="workspace-avatar">L</div><div><b>LOCAL ANALYST</b><small>Offline workspace</small></div><ChevronDown size={14} /></div>
+      <div className="workspace"><div className="workspace-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div><div><b>{authSession ? session.user.display_name : "LOCAL ANALYST"}</b><small>{authSession ? "Secure workspace" : "Offline workspace"}</small></div><ChevronDown size={14} /></div>
       <div className="nav-label">COMMAND WORKSPACE</div>
       {[
         ["Overview", Gauge],

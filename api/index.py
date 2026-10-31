@@ -156,6 +156,7 @@ def system_diagnostics():
 @app.get("/api/history")
 def get_history(request: Request, limit: int = 15):
     """Retrieve the authenticated user's replay history from Supabase."""
+    _require_authenticated_user(request)
     user_id, auth_error = _supabase_user_id(request)
     key = _supabase_public_key()
     if user_id and key:
@@ -252,8 +253,21 @@ def _supabase_public_key() -> str | None:
     return (os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("VITE_SUPABASE_ANON_KEY") or "").strip() or None
 
 
+def _require_authenticated_user(request: Request) -> str | None:
+    """Require a valid Supabase user for operational routes in configured deployments."""
+    if not _supabase_public_key():
+        return None
+    user_id, error = _supabase_user_id(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": error or "Sign in to continue."})
+    return user_id
+
+
 def _supabase_user_id(request: Request) -> tuple[str | None, str | None]:
     """Resolve the caller through Supabase Auth; never trust a client-supplied user id."""
+    cached_user_id = getattr(request.state, "supabase_user_id", None)
+    if cached_user_id:
+        return cached_user_id, None
     token = request.headers.get("authorization", "")
     if not token.lower().startswith("bearer "):
         return None, "not_authenticated"
@@ -269,7 +283,10 @@ def _supabase_user_id(request: Request) -> tuple[str | None, str | None]:
             return None, "supabase_auth_rejected"
         user = json.loads(raw.decode("utf-8"))
         user_id = user.get("id") if isinstance(user, dict) else None
-        return (str(user_id), None) if user_id else (None, "supabase_user_unavailable")
+        if user_id:
+            request.state.supabase_user_id = str(user_id)
+            return str(user_id), None
+        return None, "supabase_user_unavailable"
     except (OSError, TimeoutError):
         return None, "supabase_unreachable"
     except Exception:
@@ -425,6 +442,7 @@ def _supabase_persistence_configured() -> bool:
 @app.post("/api/agents/anomaly/score")
 def score_anomaly(payload: dict[str, Any], request: Request):
     """Run Agent 2 independently without requiring Agent 1 or evidence fusion."""
+    _require_authenticated_user(request)
     agent = get_anomaly_agent()
     if agent is None:
         raise HTTPException(
@@ -445,6 +463,7 @@ def score_anomaly(payload: dict[str, Any], request: Request):
 @app.post("/api/analyze")
 @app.post("/analyze")
 def analyze(payload: dict[str, Any], request: Request):
+    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -475,6 +494,7 @@ def analyze(payload: dict[str, Any], request: Request):
 @app.post("/api/analyze/batch")
 @app.post("/analyze/batch")
 def analyze_batch(payload: BatchAnalyzeRequest, request: Request):
+    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -495,6 +515,7 @@ def analyze_batch(payload: BatchAnalyzeRequest, request: Request):
 @app.post("/api/fusion/simulate")
 def simulate_fusion(payload: dict[str, Any], request: Request):
     """Run the production Agent 3 fusion contract against explicit A1/A2 evidence."""
+    _require_authenticated_user(request)
     predicted = str(payload.get("predicted_class", "")).upper()
     confidence = payload.get("confidence")
     anomaly_score = payload.get("anomaly_score")
@@ -523,6 +544,7 @@ def simulate_fusion(payload: dict[str, Any], request: Request):
 @app.post("/api/replay/simulate")
 def simulate_replay(payload: ReplaySimulationRequest, request: Request):
     """Run causal chronological replay over provided flow sequence."""
+    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -598,6 +620,7 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
 @app.post("/api/replay/run-official")
 def run_official_replay(request: Request):
     """Run the installed official evaluation stream and write the three submission CSVs."""
+    _require_authenticated_user(request)
     if SERVERLESS_RUNTIME:
         raise HTTPException(status_code=503, detail={"code": "LOCAL_RUNTIME_REQUIRED", "message": "Replay execution and local SQLite history require the local Python runtime; serverless previews are read-only."})
     pipeline = get_pipeline()
@@ -722,8 +745,9 @@ def run_official_replay(request: Request):
 
 
 @app.post("/api/replay/input/upload")
-async def upload_replay_input(file: UploadFile = File(...)):
+async def upload_replay_input(request: Request, file: UploadFile = File(...)):
     """Install a real organizer CSV or the known cyber-hidden.zip without extracting paths."""
+    _require_authenticated_user(request)
     if SERVERLESS_RUNTIME:
         raise HTTPException(status_code=503, detail={
             "code": "LOCAL_RUNTIME_REQUIRED",
@@ -791,8 +815,9 @@ async def upload_replay_input(file: UploadFile = File(...)):
 
 
 @app.get("/api/replay/validate")
-def validate_submissions():
+def validate_submissions(request: Request):
     """Validate submission files in outputs/submission/."""
+    _require_authenticated_user(request)
     sub_dir = BASE_DIR / "outputs" / "submission"
     if not (sub_dir / "classification.csv").is_file():
         return {
@@ -828,8 +853,9 @@ def validate_submissions():
 
 
 @app.get("/api/overview")
-def get_overview():
+def get_overview(request: Request):
     """Return operational replay counts without inventing hidden-set ground-truth metrics."""
+    _require_authenticated_user(request)
     sub_dir = BASE_DIR / "outputs" / "submission"
     replay_file = sub_dir / "replay.csv"
     policies_file = sub_dir / "policies.csv"
@@ -898,8 +924,9 @@ def get_benchmarks():
     return {"source": str(report_file.relative_to(BASE_DIR)), "verified_report": report}
 
 @app.get("/api/submissions/download/{filename}")
-def download_submission_file(filename: str):
+def download_submission_file(filename: str, request: Request):
     """Download an official submission CSV or report."""
+    _require_authenticated_user(request)
     allowed = {"classification.csv", "policies.csv", "replay.csv", "summary.json", "validation_report.json"}
     if filename not in allowed:
         raise HTTPException(status_code=400, detail=f"Invalid file requested: {filename}")
@@ -913,8 +940,9 @@ def download_submission_file(filename: str):
 
 
 @app.get("/api/flows/sample")
-def get_flows_sample(limit: int = 50, offset: int = 0, class_filter: str | None = None):
+def get_flows_sample(request: Request, limit: int = 50, offset: int = 0, class_filter: str | None = None):
     """Return flow features joined to predictions/actions, never ground-truth labels."""
+    _require_authenticated_user(request)
     if limit < 1 or limit > 200 or offset < 0:
         raise HTTPException(status_code=422, detail="limit must be 1..200 and offset must be non-negative.")
 
@@ -988,8 +1016,9 @@ def get_flows_sample(limit: int = 50, offset: int = 0, class_filter: str | None 
     }
 
 @app.get("/api/policies")
-def get_policies(limit: int = 50, offset: int = 0):
+def get_policies(request: Request, limit: int = 50, offset: int = 0):
     """Retrieve policies generated during replay from outputs/submission/policies.csv."""
+    _require_authenticated_user(request)
     pol_file = BASE_DIR / "outputs" / "submission" / "policies.csv"
     if not pol_file.is_file():
         return {"policies": [], "total": 0}
@@ -1005,6 +1034,7 @@ def get_policies(limit: int = 50, offset: int = 0):
 @app.post("/api/policies/test")
 def test_policy_prefilter(payload: dict[str, Any], request: Request):
     """Test a policy against organizer record positions, not numeric record-ID arithmetic."""
+    _require_authenticated_user(request)
     source_ip = str(payload.get("source_ip", "")).strip()
     current_step = payload.get("current_step", 1)
     try:
@@ -1072,8 +1102,9 @@ def test_policy_prefilter(payload: dict[str, Any], request: Request):
 
 
 @app.get("/api/correlation/groups")
-def get_correlation_groups(limit: int = 20):
+def get_correlation_groups(request: Request, limit: int = 20):
     """Return groups observed in the latest completed replay; no fabricated fixtures."""
+    _require_authenticated_user(request)
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 200.")
     return {
