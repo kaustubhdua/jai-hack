@@ -6,220 +6,249 @@
 [![Python tests](https://github.com/kaustubhdua/jai-hack/actions/workflows/python-tests.yml/badge.svg?branch=main)](https://github.com/kaustubhdua/jai-hack/actions/workflows/python-tests.yml)
 [![Frontend build](https://github.com/kaustubhdua/jai-hack/actions/workflows/frontend-build.yml/badge.svg?branch=main)](https://github.com/kaustubhdua/jai-hack/actions/workflows/frontend-build.yml)
 
-CyberSentinel is an offline multi-agent cybersecurity command platform that analyzes network-flow records, correlates multi-flow attack campaigns, fuses supervised and unsupervised evidence, and enforces temporary simulated quarantine policies. All tactical decisions—`ALLOW`, `BLOCK`, and `REVIEW`—are simulated. CyberSentinel never monitors live network sockets, injects malicious packets, or alters host operating system firewalls.
+CyberSentinel analyzes network-flow records with two learned detectors and three deterministic response agents. It combines classification, anomaly evidence, chronological correlation, and temporary policy simulation in an analyst console.
 
----
+> **Scope:** The supported workflow is offline analysis and replay. <code>ALLOW</code> and <code>BLOCK</code> are simulated replay outcomes. CyberSentinel does not inspect live network traffic, inject packets, or change an operating-system firewall.
 
-## 1. System Architecture & Five Cooperative Agents
+## 30-second overview
 
-CyberSentinel decomposes enterprise threat response into five specialized, cooperating agents:
+- **Problem:** A single flow label does not explain whether independent evidence agrees, activity forms a campaign, or a later policy should apply.
+- **Approach:** Combine a supervised classifier and benign-baseline anomaly detector with evidence fusion, chronological correlation, and a forward-only policy lifecycle.
+- **Outputs:** Per-record classification evidence, a chronological replay decision, and temporary simulated policies.
+- **Emphasis:** Explainable evidence states, causal replay, traceable outputs, and clear limits on what the data can prove.
 
-```
-                  ┌────────────────────────────────────────┐
-                  │    Network Flow Packet Stream (CICIDS) │
-                  └───────────────────┬────────────────────┘
-                                      │
-                   [A1/A2 classification pass for every row]
-                                      │
-                   ┌──────────────────┴──────────────────┐
-                   ▼                                     ▼
-        ┌───────────────────────┐             ┌─────────────────────┐
-        │  Agent 1: Threat Det  │             │ Agent 2: Anomaly Det│
-        │ (Random Forest)      │             │ (Isolation Forest)  │
-        └──────────┬────────────┘             └──────────┬──────────┘
-                   │                                     │
-                   └──────────────────┬──────────────────┘
-                                      ▼
-                         ┌─────────────────────────┐
-                         │ Agent 3: Evidence Fusion│
-                         │ (Tactical ALLOW/BLOCK)  │
-                         └────────────┬────────────┘
-                                      │
-                                      ▼
-                         ┌─────────────────────────┐
-                         │ Agent 5: Active Policy  │
-                         │ Gate: BLOCK or ALLOW    │
-                         └────────────┬────────────┘
-                                      │ ALLOW only
-                                      ▼
-                         ┌─────────────────────────┐
-                         │Agent 4: Temp Correlation│
-                         │ (Scan / DDoS / Brute)   │
-                         └────────────┬────────────┘
-                                      │
-                                      ▼
-                         ┌─────────────────────────┐
-                         │Agent 5: Adaptive Defense│
-                         │Policy gate + forward rule│
-                         └─────────────────────────┘
+## Five-minute presentation route
+
+| Time | Show | Presenter pointers |
+|---|---|---|
+| 00:00–00:35 | Project overview | Introduce the flow-analysis problem and the goal: combine independent signals with temporal context. |
+| 00:35–01:30 | Architecture flowchart | Point out the two learned agents, three deterministic agents, and separation between evidence and replay action. |
+| 01:30–02:45 | Analyst console | Use actual local artifacts: diagnostics, a flow inspection, evidence fusion, then chronological replay. Label manual inputs as what-if scenarios. |
+| 02:45–03:45 | Replay flowchart | Explain that only a policy active before record N can block N; the trigger record cannot block itself. |
+| 03:45–04:35 | Current evaluation report | Show only a fresh run with its code revision and input/model hashes. State the repeated-feature overlap caveat. |
+| 04:35–05:00 | Submission contract | Show the three CSV outputs and independent validator. A local pass means schema consistency, not organizer acceptance. |
+
+Before the demo, confirm data and model readiness with diagnostics, generate the run you plan to show, and keep its report and input hashes available. Do not present archived metrics as current results or infer hidden-set performance from the unlabelled replay.
+
+## Runtime flow
+
+A1 and A2 produce evidence for every record. The chronological gate checks policies active before that record. A blocked record remains in the classification output but does not update temporal or policy state.
+
+```mermaid
+flowchart TD
+  F["Flow record N in organizer order"] --> A1["A1 · Threat classification"]
+  F --> A2["A2 · Benign-baseline anomaly score"]
+  A1 --> A3["A3 · Evidence fusion"]
+  A2 --> A3
+  A3 --> C["Keep classification evidence for record N"]
+  C --> G{"Matching policy active before N?"}
+  G -->|"Yes"| B["Simulated BLOCK<br/>reference matching policy"]
+  G -->|"No"| AL["Simulated ALLOW<br/>active_policy_id = NONE"]
+  AL --> A4["A4 · Update chronological context<br/>with observed replay fields"]
+  A4 -->|"Trigger"| A5["A5 · Schedule a temporary policy<br/>effective from a later record"]
+  A4 -->|"No trigger"| NEXT["Continue to record N+1"]
+  A5 --> NEXT
+  B --> NEXT
 ```
 
-1. **Agent 1 (Threat Detection):** Supervised five-class Random Forest (400 estimators by default; optional XGBoost backend) for `BENIGN`, `BRUTE_FORCE`, `DOS`, `DDOS`, and `PORT_SCAN`. Confidence is the maximum temperature-scaled `predict_proba` output when the combined training workflow runs its default stratified training-only calibration holdout. Use `--calibration-fraction 0` to disable calibration; in that case confidence is explicitly uncalibrated.
-2. **Agent 2 (Anomaly Detection):** Independent Isolation Forest trained on benign training rows only. The baseline threshold is the first percentile of benign training decision scores; the optional held-out validation workflow selects a threshold that maximizes attack recall under a configured benign false-positive ceiling. The exported anomaly value is a bounded 0–1 index (higher means more anomalous), not a probability; the threshold is applied to the underlying decision function.
-3. **Agent 3 (Evidence Fusion):** Reconciles classifier and anomaly evidence into `AGREE`, `CONFLICT`, or `UNCERTAIN` status and an internal recommendation. A corroborated threat can trigger a temporary policy for later records; it does not retroactively block its trigger row. The current replay action is `BLOCK` only when an earlier active policy matched, otherwise `ALLOW`.
-4. **Agent 4 (Temporal Correlation):** Stateful chronological correlator maintaining a 150-flow sliding window to detect distributed Port Scans ($\ge 5$ distinct destination ports), DDoS volumetric surges, and repeated SSH/FTP authentication sweeps.
-5. **Agent 5 (Adaptive Defense):** Dynamic policy lifecycle manager that checks active unexpired rules before correlation and policy updates and generates forward-looking temporary quarantine policies (`POL-XXXXX`, `scope_type = "SOURCE_IP"`, `expires_after = step + 150`).
+### The five agents
 
----
+| Agent | Role | Presenter pointer |
+|---|---|---|
+| **A1 · Threat Detection** | Supervised five-class classifier | Random Forest is the default (400 estimators in the combined trainer); XGBoost is optional. Classes: <code>BENIGN</code>, <code>BRUTE_FORCE</code>, <code>DOS</code>, <code>DDOS</code>, <code>PORT_SCAN</code>. Confidence uses the default training-only calibration holdout; <code>--calibration-fraction 0</code> disables calibration. |
+| **A2 · Anomaly Detection** | Independent benign-baseline detector | Isolation Forest is fitted on BENIGN training rows. Its exported 0–1 anomaly index is higher for more anomalous flows; it is **not a probability**. The default operating threshold comes from benign training scores. |
+| **A3 · Evidence Fusion** | Deterministic evidence combiner | Returns <code>AGREE</code>, <code>CONFLICT</code>, or <code>UNCERTAIN</code> with rationale. Evidence status is distinct from replay action. |
+| **A4 · Temporal Correlation** | Chronological pattern analysis | Maintains a bounded 150-record window and uses organizer time fields when available (configured 300-second window). Correlates patterns such as scans, denial-of-service activity, and repeated authentication attempts. |
+| **A5 · Adaptive Defense** | Simulated policy lifecycle | Checks existing policies and schedules temporary forward-only policies. A policy cannot block its own trigger. Policy scope uses literal observed endpoints, never synthetic identities. |
 
-## 2. Evaluation Status & Dataset Boundaries
+### Evidence is not the replay action
 
-The data audit in [`docs/data-intelligence.md`](docs/data-intelligence.md) records the supplied split sizes, schema, cleaning decisions, and class counts. It also found 8,161 distinct feature vectors shared by training and evaluation, covering 9,795 evaluation rows (8.58%). Keep this overlap caveat with any score; the official evaluation set remains unchanged, but repeated feature vectors can make holdout results optimistic.
+- A1/A2/A3 describe a record and the relationship between detector outputs.
+- Replay action is <code>BLOCK</code> only when a matching A5 policy was active before the record.
+- Without a match, replay action is <code>ALLOW</code>; <code>replay.csv</code> uses <code>active_policy_id=NONE</code>.
+- A suspicious classification or fusion conflict alone does not prove that a policy blocked the record.
+- A policy created during record N can affect later records, not N.
 
-The repository does not include organizer data, prepared Parquet files, fitted model artifacts, or generated submission CSVs. These local artifacts are excluded by `.gitignore` and must be created from authorized organizer data. The API expects versioned model artifacts at `models/threat_detection/model.joblib` and `models/anomaly_detection/model.joblib`; the supported training workflow creates them locally. Historical metrics in release reports are snapshots from earlier code and data runs, not current performance claims. Reproduce results with the current code and authorized inputs before quoting them.
+## Data and evaluation
 
-## 3. Known Limitations & Judge Disclosure
+The [data audit](docs/data-intelligence.md) documents the supplied labelled split:
 
-Read [`docs/judge-disclosures.md`](docs/judge-disclosures.md) before the live demo. In brief:
+| Split | Rows | Columns | Numeric flow features |
+|---|---:|---:|---:|
+| Training | 456,737 | 80 | 78 |
+| Evaluation | 114,185 | 80 | 78 |
 
-- The CICIDS2017 training/evaluation feature partitions do not contain native Layer-3 endpoints. The separate 200-row Level 2 hidden input does contain organizer-provided `source_ip` and `destination_ip` fields. Correlation and policy generation use only those literal observed endpoints. Missing or invalid endpoints remain unknown; no IP is derived from TCP fingerprints, hashes, or other synthetic identities.
-- The documented train/eval feature overlap is 8.58% of evaluation rows and can make repeated-flow results optimistic.
-- Agent 1 confidence is calibrated by the default training-only holdout; it remains uncalibrated only when calibration is explicitly disabled. Agent 2 exports a bounded 0–1 anomaly index (higher means more anomalous), not a probability; its operating threshold is applied to the underlying Isolation Forest decision function.
-- The temporal correlator has a fixed 150-record cap and a configured 300-second time window when timestamps are available. Adaptive-defense policy duration defaults to 150 replay positions; these are fixed configuration values, not learned/adaptive parameters.
-- Validation is limited to CICIDS2017. The workflow is offline replay, not live network monitoring; generalization to other datasets and live environments is untested.
+The 80 columns are 78 numeric flow measurements, <code>record_id</code>, and <code>label</code>.
 
-## 4. Causal Replay Behavior
+| Class | Training rows | Evaluation rows |
+|---|---:|---:|
+| <code>BENIGN</code> | 240,000 | 60,001 |
+| <code>BRUTE_FORCE</code> | 5,537 | 1,384 |
+| <code>DOS</code> | 96,000 | 24,000 |
+| <code>DDOS</code> | 57,600 | 14,400 |
+| <code>PORT_SCAN</code> | 57,600 | 14,400 |
 
-The chronological replay engine enforces these invariants:
+**Required caveat:** 8,161 distinct feature vectors occur in both splits and cover 9,795 evaluation rows (8.58%). This overlap can make repeated-flow results optimistic. Keep the official evaluation rows intact and disclose the overlap with any score.
 
-1. Only policies active before record `N` may affect record `N`.
-2. A record cannot trigger a policy that blocks itself.
-3. Classifications are recorded for every input flow, including flows later blocked by an already-active simulated policy.
-4. Policies activate on the record after their trigger and remain active through the expiry record, inclusive.
+### Data-use flow
 
-All actions are simulated. The system does not modify a host firewall or inspect live network traffic.
-
----
-
-## 5. Reproducible Local Training and Replay
-
-Install the organizer data packs into ignored local paths. The installer verifies the training/evaluation partition sizes and SHA-256 values against the supplied manifest, and validates the exact 200-row unlabelled hidden input:
-
-```bash
-python scripts/prepare_challenge_data.py \
-  --training-pack cyber-pack.zip \
-  --hidden-pack cyber-hidden.zip
-
-pip install -e ".[dev,ml]"
-
-# Train A1 and A2 from the authorized training partition only.
-# By default, 15% of that partition is held out for A1 confidence calibration.
-# A2 fits BENIGN rows only and sets its default threshold from benign training scores.
-python scripts/train_models.py --train data/raw/training/flows.parquet
-
-# Optional: pass --validation only when organizers provide a separate labelled
-# validation partition. Never use hidden records or the held-out evaluation split
-# for model fitting or calibration.
-
-python scripts/generate_submissions.py \
-  --input data/processed/hidden_replay_input.csv \
-  --output-dir outputs/submission
-
-python scripts/validate_submissions.py \
-  --input data/processed/hidden_replay_input.csv \
-  --output-dir outputs/submission
+```mermaid
+flowchart LR
+  PACK["Authorized organizer packs"] --> PREP["Prepare and verify local inputs"]
+  PREP --> TRAIN["Training partition"]
+  TRAIN --> HOLD["Training-only calibration holdout"]
+  TRAIN --> FIT["Fit A1 and BENIGN-only A2"]
+  HOLD --> CAL["Calibrate A1 confidence"]
+  FIT --> MODELS["Local model artifacts"]
+  EVAL["Labelled evaluation partition"] --> SCORE["Score existing models only"]
+  MODELS --> SCORE
+  SCORE --> REPORT["Evaluation report + run metadata"]
+  HIDDEN["Unlabelled Level 2 replay input"] --> REPLAY["Chronological offline replay"]
+  MODELS --> REPLAY
+  REPLAY --> CSV["classification.csv · replay.csv · policies.csv"]
+  CSV --> VALIDATE["Independent contract validator"]
 ```
 
-The three files are `classification.csv`, `replay.csv`, and `policies.csv`. The independent validator checks exact headers, all 200 IDs and their order, the anomaly-score range, evidence taxonomy, observed endpoint scopes, activation-exclusive/expiry-inclusive policy windows, `active_policy_id=NONE` on ALLOW, and the lexicographically smallest matching policy for every BLOCK. A limited run is only a smoke test. A local validator pass is not proof of organizer acceptance.
+- The combined trainer uses a deterministic stratified 15% holdout from training for A1 confidence calibration.
+- A2 fits BENIGN rows and derives its default threshold from training scores. Label-based threshold selection requires a separate, explicitly permitted labelled validation set.
+- The held-out evaluation partition is for scoring, not fitting or threshold selection.
+- The documented Level 2 input contains 200 unlabelled records in organizer order. It has no ground-truth labels. Do not calculate hidden-set accuracy, macro-F1, attack recall, false-block rate, or containment from it.
+- Organizer data, prepared files, fitted models, generated reports, and submission outputs are local artifacts ignored by Git.
 
----
+### Results to present
 
-## 6. Analyst Console & Investigation Workbench
+- **A1:** Use a fresh labelled evaluation report; include macro-F1 and per-class results, especially for rare <code>BRUTE_FORCE</code>.
+- **A2:** Distinguish ranking metrics from operational threshold results. Report threshold FPR/attack recall only when a labelled evaluation workflow measured them.
+- **A3–A5:** Show the documented evaluation/replay workflow, configuration, and run metadata. Do not turn unlabelled replay counts into accuracy or containment claims.
+- Record the code revision and dataset/model hashes for every run.
+- Treat reports under <code>release/</code> as historical unless explicitly identified as current contract or audit documents. Regenerate before quoting metrics.
 
-The frontend provides an analyst-focused offline replay console. Data panels show backend artifacts when available and explicit unavailable/empty states otherwise. The 3D topology and particle effects are illustrative UI animations, not live network telemetry. Manual fusion scenarios are explicitly marked as what-if inputs. The console includes:
-1. **Overview / SOC Command Center:** Illustrative WebGL 3D five-agent architecture view with interactive pointer tilt, visual-only schematic states, and 2D canvas fallback; it does not claim live network telemetry.
-2. **Five-Agent Architecture:** Deep-dive cards showing model parameters and input/output contracts; measured latency appears only when a real benchmark/replay report exists.
-3. **Flow Inspector:** Single-flow offline analysis for a user-supplied flow record, with the actual Agent 2 deviation evidence returned by the trained model; no synthetic attack presets or heuristic feature-impact scores.
-4. **Evidence Fusion:** Manual what-if fusion simulator that calls the backend decision rules; inputs are explicitly not presented as observed flows or model predictions.
-5. **Temporal Investigations:** Multi-flow incident tracker grouping coordinated Port Scans, DDoS amplification, and brute force campaigns.
-6. **Adaptive Defense:** Stateful policy manager displaying active vs. expired host quarantine rules and interactive pre-filter tester.
-7. **Replay Studio:** Chronological playback of generated replay artifacts with explicit backend progress and no fabricated traffic events.
-8. **Submission Studio:** One-click official CSV bundle downloads (`/api/submissions/download/*`) and automated submission auditor.
-9. **Model Intelligence:** Interactive 5x5 confusion matrix, per-class PR/F1 tables, and isolation forest calibration curves.
-10. **Audit & Local History:** Offline SQLite persistence (`data/cybersentinel_history.db`) logging historical runs.
-11. **Settings & System Health:** Service readiness checklist, model artifact verifier, and offline safety disclosures.
+## Analyst console walkthrough
 
----
+Use the console to show the workflow, not as evidence of live network telemetry:
 
-## 7. Installation & Quickstart
+1. **Overview / SOC Command Center** — five-agent schematic; 3D effects are illustrative.
+2. **Five-Agent Architecture** — roles, parameters, and input/output contracts.
+3. **Flow Inspector** — offline analysis of a supplied flow and model-returned anomaly evidence.
+4. **Evidence Fusion** — backend decision rules; manual inputs are what-if scenarios.
+5. **Temporal Investigations** — chronological campaign groups from available replay data.
+6. **Adaptive Defense** — active and expired simulated policies.
+7. **Replay Studio** — playback of generated artifacts and actual backend progress.
+8. **Submission Studio** — CSV downloads and contract validation.
+9. **Model Intelligence** — generated reports; missing reports remain unavailable.
+10. **Audit / History / System Health** — local SQLite history, artifact readiness, and offline-scope disclosures.
 
-### Prerequisites
-* Python 3.10+ (CI currently uses Python 3.11)
-* Node.js 20+ and npm (CI uses Node 20)
+If data, models, or reports are missing, the application should show an unavailable or empty state. A successful frontend build does not establish model readiness.
 
-### 1. Backend Setup
-```bash
-# Clone repository
-git clone https://github.com/kaustubhdua/jai-hack.git
-cd jai-hack
+## Reproduce the local workflow
 
-# Install Python ML dependencies
-pip install -e ".[dev,ml]"
-```
+### 1. Prepare authorized inputs and dependencies
 
-### 2. Run Reproducible Benchmark Suite
-```bash
-# Recomputes metrics from the authorized local dataset and model artifacts
-python scripts/reproduce_benchmarks.py
-```
+    python scripts/prepare_challenge_data.py \
+      --training-pack cyber-pack.zip \
+      --hidden-pack cyber-hidden.zip
 
-### 3. Generate Local Replay Files
-```bash
-# Generates local replay CSVs when data and models are available
-python scripts/generate_submissions.py --input data/processed/hidden_replay_input.csv --output-dir outputs/submission
-```
+    python -m pip install -e ".[dev,ml]"
 
-### 4. Run the Pytest Suite
-```bash
-python -m pytest tests -q
-```
+The preparation script verifies supplied training/evaluation data against its manifest and validates the hidden replay input. Keep organizer files out of Git.
 
-### 5. Frontend Setup & Build
-```bash
-# Install frontend dependencies
-npm install
+### 2. Train the learned agents
 
-# Type-check and build
-npm run build
+    python scripts/train_models.py \
+      --train data/raw/training/flows.parquet
 
-# Start local development server
-npm run dev
-```
+Artifacts are written locally to:
 
-### 6. Start FastAPI Backend Server
-```bash
-uvicorn api.index:app --host 0.0.0.0 --port 8000 --reload
-```
+- <code>models/threat_detection/model.joblib</code>
+- <code>models/anomaly_detection/model.joblib</code>
 
----
+Do not use the hidden replay input or held-out evaluation split to fit, calibrate, or select thresholds. Use A2 validation tuning only when organizers permit it and provide a separate labelled partition.
 
+### 3. Evaluate on the labelled evaluation partition
 
+    python scripts/evaluate_benchmark.py \
+      --eval data/raw/evaluation/flows.parquet \
+      --threat-model models/threat_detection/model.joblib \
+      --anomaly-model models/anomaly_detection/model.joblib \
+      --output reports/generated/official_evaluation.json
 
-### Backend endpoints added for the final SOC workflow
+Evaluation scores existing artifacts; it does not train models or tune thresholds. Include the repeated-feature overlap caveat.
 
-- `GET /api/system/diagnostics` — reports actual local model, dataset, SQLite and submission artifact presence.
-- `GET /api/overview` — reports operational counts from unlabelled hidden replay outputs; ground-truth performance metrics remain unavailable.
-- `POST /api/fusion/simulate` — invokes the production Python Agent 3 fusion contract.
-- `POST /api/replay/run-official` — runs the installed unlabelled hidden replay input chronologically and writes the three official CSVs.
-- `GET /api/correlation/groups` — returns groups from the latest completed replay in the current API process, or an empty list when none exist.
+### 4. Generate and validate the unlabelled replay bundle
 
-If the dataset or models are missing, the API returns an explicit unavailable response. It does not substitute synthetic benchmark values or sample incidents.
+    python scripts/generate_submissions.py \
+      --input data/processed/hidden_replay_input.csv \
+      --output-dir outputs/submission
 
-### Observed endpoint boundary
+    python scripts/validate_submissions.py \
+      --input data/processed/hidden_replay_input.csv \
+      --output-dir outputs/submission
 
-The hidden replay input supplies literal source and destination IP metadata. Those fields are used for temporal correlation and policy scope matching. The CICIDS2017 training/evaluation feature partitions do not supply endpoints, so endpoint-aware analysis is not claimed for those partitions. Missing or invalid endpoint fields remain unknown; the implementation never manufactures an IP address from flow fingerprints or hashes. See `release/benchmarks/source-ip-scope-audit.md`.
+A limited run is a smoke test only. A local validator pass confirms contract consistency; only an organizer response or receipt confirms acceptance.
 
-## 8. Third-Party, Reference & AI Disclosures
+### Submission contract
 
-* **Dependencies:** `scikit-learn`, `pandas`, `numpy`, `joblib`, `fastapi`, `pydantic`, `three`, `react`, `lucide-react`, and `vite`. Their respective licenses apply.
-* **Project license:** MIT License; see [`LICENSE`](LICENSE). Third-party dependencies and CICIDS2017/challenge datasets retain their own licenses and terms.
-* **Dataset:** CICIDS2017 flow data and the challenge’s class mapping are governed by their respective providers and organizer terms. No challenge data is committed.
-* **AI assistance:** The team reports using Antigravity and ChatGPT for code review, debugging, test design, documentation, and UI implementation assistance. Team members remain responsible for understanding and presenting the submitted code.
-* **UI/UX reference:** The team reports reviewing the user-supplied `CICRCombined-main` archive for design patterns only. The related public project is [amancodes8/CICRCombined](https://github.com/amancodes8/CICRCombined). The team reports that no source files or components were copied; verify the exact archive’s license before any code reuse.
-* **Architecture reference:** [Vaibhav-Patidar/cybersentinel](https://github.com/Vaibhav-Patidar/cybersentinel) was reviewed for high-level data-pipeline and evidence-presentation ideas. The team reports that no source files were copied.
+| File | Exact header | Key invariant |
+|---|---|---|
+| <code>classification.csv</code> | <code>record_id,predicted_class,anomaly_score,evidence_status</code> | One row per input in order; five-class prediction; finite anomaly index in [0,1]; evidence is <code>AGREE</code>, <code>CONFLICT</code>, or <code>UNCERTAIN</code>. |
+| <code>replay.csv</code> | <code>record_id,action,active_policy_id</code> | One row per input in order; action is <code>ALLOW</code> or <code>BLOCK</code>; ALLOW uses <code>NONE</code>; BLOCK cites the lexicographically smallest matching active policy. |
+| <code>policies.csv</code> | <code>policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id</code> | Zero or more unique policies; exact observed endpoint scope; active from the next record through expiry, inclusive. |
 
-Historical release and QA documents are indexed in [`release/README.md`](release/README.md); their old pass statuses are not current verification.
+The [Level 2 brief](docs/level2-brief.md) and [submission contract audit](release/benchmarks/submission-contract-results.md) define the schema used here. Recheck current organizer templates before submission; a changed template requires matching generator and validator updates.
 
-### Deployment boundary
+## Run the local app
 
-The authoritative full-data workflow is local/offline. The Vercel-connected frontend/API bundle can build, but Git deployments do not include the ignored organiser dataset or fitted model artifacts; model-backed API routes therefore remain unavailable until authorised artifacts are provisioned. The Vercel function timeout is currently 30 seconds, and run history uses local SQLite rather than durable shared storage. Do not treat a READY Vercel deployment as proof of a production-ready replay service. See [`docs/deployment.md`](docs/deployment.md) for the exact runtime boundaries and local run instructions.
+Prerequisites: Python 3.10+, Node.js 20+, and npm.
+
+    python -m pip install -e ".[dev,ml]"
+    npm install
+    uvicorn api.index:app --host 127.0.0.1 --port 8000
+
+In a second terminal:
+
+    npm run dev
+
+Vite proxies <code>/api</code> requests to FastAPI. See [deployment and runtime boundaries](docs/deployment.md).
+
+Useful routes:
+
+- <code>GET /api/health</code> and <code>GET /api/models/status</code> — API and model readiness.
+- <code>GET /api/system/diagnostics</code> — local models, data, history, and submission artifacts.
+- <code>POST /api/fusion/simulate</code> — production fusion contract for what-if inputs.
+- <code>POST /api/replay/run-official</code> — run the installed hidden input and write the CSVs.
+- <code>GET /api/replay/validate</code> — validate outputs against the original replay input.
+- <code>GET /api/correlation/groups</code> — groups from the latest completed replay in this API process.
+
+Example JSON and numeric values in the [API reference](docs/api.md) are illustrative placeholders, not measured results.
+
+## Limitations and judge disclosures
+
+- **Offline scope:** No live packet capture, socket monitoring, traffic injection, or host firewall changes.
+- **Endpoint provenance:** Labelled CICIDS2017 features do not contain native Layer-3 endpoints. The hidden replay input provides literal endpoint fields. Missing or invalid endpoints remain unknown; no IP is derived from fingerprints or hashes.
+- **Dataset scope:** Evaluation is documented for CICIDS2017. Transfer to other datasets and live environments is untested.
+- **Fixed configuration:** Correlation windows and policy duration are bounded settings, not learned or self-adjusting parameters.
+- **Model files:** Joblib uses Python pickle serialization. Load artifacts only from trusted provenance.
+- **Deployment:** Data and models are ignored by Git. A normal Vercel build does not establish model readiness; full synchronous replay may exceed the configured 30-second function timeout, and SQLite history is local rather than durable shared storage. Do not describe the deployment as a production SOC service.
+- **Historical reports:** Older release and QA reports may describe earlier code, results, or schemas; they are not current verification.
+
+Read [judge disclosures](docs/judge-disclosures.md), [evaluation and replay](docs/evaluation.md), and [deployment boundaries](docs/deployment.md) before presenting.
+
+## Third-party, reference, and AI disclosures
+
+- **Project license:** MIT; see [LICENSE](LICENSE). Third-party packages and challenge datasets retain their own licenses and terms.
+- **Dataset:** CICIDS2017 and organizer data are subject to provider and challenge terms. No challenge rows are committed.
+- **AI assistance:** The team reports using Antigravity and ChatGPT for code review, debugging, test design, documentation, and UI implementation. Team members are responsible for understanding and presenting the submitted work.
+- **UI reference:** The team reports reviewing the user-supplied <code>CICRCombined-main</code> archive for design patterns only and reports that no source files or components were copied. Verify the archive's license before any code reuse.
+- **Architecture reference:** The team reports reviewing [Vaibhav-Patidar/cybersentinel](https://github.com/Vaibhav-Patidar/cybersentinel) for high-level pipeline and evidence-presentation ideas; no source files were reported as copied.
+
+## Further reading
+
+- [Architecture and API overview](docs/architecture.md)
+- [API reference](docs/api.md)
+- [Data audit](docs/data-intelligence.md)
+- [Five-agent training and verification](docs/five-agent-training.md)
+- [Evaluation, data boundaries, and replay](docs/evaluation.md)
+- [Level 2 replay contract](docs/level2-brief.md)
+- [Judge disclosures](docs/judge-disclosures.md)
+- [Deployment and runtime boundaries](docs/deployment.md)
+- [Current contract audits and historical report index](release/README.md)
