@@ -24,13 +24,13 @@ The validation report measures benign false-positive rate and attack detection r
 
 ### Importing the earlier standalone Agent 2 artifact
 
-The earlier `train_agent2.py` output is **not in the repository's native artifact schema**. Convert it before placing it at the API's expected path:
+The repository currently tracks one legacy teammate-supplied Agent 2 artifact at `models/model.native.joblib`. It is not loaded automatically and is not the versioned runtime artifact expected by the API. If (and only if) you trust its provenance, convert it before placing it at the API's expected path:
 
 ```bash
-python scripts/import_agent2_artifact.py --source path/to/model2(1).joblib --destination models/anomaly_detection/model.joblib
+python scripts/import_agent2_artifact.py --source models/model.native.joblib --destination models/anomaly_detection/model.joblib
 ```
 
-Only load joblib files you created and trust. This adapter preserves the stored threshold and the legacy zero-fill preprocessing. It cannot reconstruct the old training distribution's feature profiles, so feature-level anomaly explanations are unavailable for imported artifacts. Prefer retraining with the native Agent 2 trainer for the complete native artifact.
+Joblib uses Python pickle serialization and loading it can execute code. Do not import artifacts from unknown sources. The adapter preserves the stored threshold and legacy zero-fill preprocessing. It cannot reconstruct the old training distribution's feature profiles, so feature-level anomaly explanations are unavailable for imported artifacts. Prefer retraining with the native Agent 2 trainer. This legacy artifact does not provide Agent 1; train Agent 1 separately from the authorized labelled training partition. Do not commit additional trained binary artifacts or organizer data.
 
 ## Agent 3 — evidence fusion
 
