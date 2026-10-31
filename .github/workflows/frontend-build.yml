@@ -14,5 +14,7 @@ jobs:
           node-version: "20"
       - name: Install frontend dependencies
         run: npm install --no-audit --no-fund
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
       - name: Type-check and build
         run: npm run build
