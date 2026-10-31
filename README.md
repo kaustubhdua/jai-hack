@@ -238,7 +238,6 @@ Read [judge disclosures](docs/judge-disclosures.md), [evaluation and replay](doc
 - **Project license:** MIT; see [LICENSE](LICENSE). Third-party packages and challenge datasets retain their own licenses and terms.
 - **Dataset:** CICIDS2017 and organizer data are subject to provider and challenge terms. No challenge rows are committed.
 - **AI assistance:** The team reports using Antigravity and ChatGPT for code review, debugging, test design, documentation, and UI implementation. Team members are responsible for understanding and presenting the submitted work.
-- **UI reference:** The team reports reviewing the user-supplied <code>CICRCombined-main</code> archive for design patterns only and reports that no source files or components were copied. Verify the archive's license before any code reuse.
 - **Architecture reference:** The team reports reviewing [Vaibhav-Patidar/cybersentinel](https://github.com/Vaibhav-Patidar/cybersentinel) for high-level pipeline and evidence-presentation ideas; no source files were reported as copied.
 
 ## Further reading
