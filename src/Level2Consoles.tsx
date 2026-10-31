@@ -3,7 +3,7 @@ import { apiFetch, downloadAuthenticatedFile } from "./lib/api";
 import {
   Activity, Check, Database, Download, FileSpreadsheet, Fingerprint,
   Gauge, Layers, LockKeyhole, Play, RefreshCw,
-  ShieldAlert, ShieldCheck
+  ShieldAlert
 } from "lucide-react";
 const NetworkTopology3D = lazy(() => import("./components/NetworkTopology3D").then(module => ({ default: module.NetworkTopology3D })));
 
