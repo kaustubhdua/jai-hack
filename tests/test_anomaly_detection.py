@@ -111,3 +111,22 @@ def test_validation_threshold_calibration_respects_benign_fpr_limit():
     assert 0.0 <= metrics["attack_recall"] <= 1.0
     assert agent.metadata["threshold_selection_uses_labels"] is True
     assert agent.metadata["labels_used_during_scoring"] is False
+
+def test_organizer_replay_metadata_is_not_an_anomaly_feature():
+    from cybersentinel.agents.anomaly_detection import _numeric_frame
+
+    frame = benign_sample(rows=5)
+    frame["seq"] = [1, 2, 3, 4, 5]
+    frame["day"] = ["2017-07-04"] * 5
+    frame["time_offset"] = ["00:49.8", "02:14.1", "02:39.9", "05:49.2", "06:51.8"]
+    frame["source_ip"] = ["192.168.10.12"] * 5
+    frame["destination_ip"] = ["192.168.10.3"] * 5
+    frame["source_port"] = [51001, 51002, 51003, 51004, 51005]
+    frame["destination_port"] = [80, 443, 22, 21, 3389]
+    frame["protocol"] = [6] * 5
+
+    features = _numeric_frame(frame)
+    assert set(features.columns) == {
+        "Destination Port", "Flow Duration", "Total Fwd Packets",
+        "Flow Packets/s", "Flow Bytes/s",
+    }
