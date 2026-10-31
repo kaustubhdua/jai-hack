@@ -6,7 +6,7 @@ Executes complete evaluations across all 5 agents on official prepared datasets:
 3. Agent 2 Anomaly Detection Evaluation (Isolation Forest, score-inverted)
 4. Seen vs Unseen Feature Generalization
 5. Leave-One-Attack-Out (LOAO) 4-Trial Zero-Day Experiments
-6. Agent 1 Probability Calibration (Isotonic / Platt scaling)
+6. Agent 1 Probability Calibration (training-only group-isolated temperature scaling)
 7. Agent 4 Temporal Correlation & Campaign Detection
 8. Agent 5 Adaptive Defense 4-Way Configuration Comparison
 9. Publication Plot Generation (PNG & SVG)
@@ -51,6 +51,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("evaluate_full_system")
 
+BENCHMARK_CLASSES = {"BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN"}
+
+
+def validate_partition(frame: pd.DataFrame, name: str) -> None:
+    if "label" not in frame.columns:
+        raise ValueError(f"{name} dataset is missing the required 'label' column.")
+    labels = frame["label"].astype(str).str.strip().str.upper()
+    if labels.isna().any() or (labels == "").any():
+        raise ValueError(f"{name} dataset contains missing or empty labels.")
+    unknown = sorted(set(labels.unique()) - BENCHMARK_CLASSES)
+    missing = sorted(BENCHMARK_CLASSES - set(labels.unique()))
+    if unknown or missing:
+        raise ValueError(f"{name} dataset label contract failed; unknown={unknown}, missing={missing}.")
+    if "record_id" in frame.columns and frame["record_id"].duplicated().any():
+        raise ValueError(f"{name} dataset contains duplicate record_id values.")
+
+
 
 def main():
     start_total = time.perf_counter()
@@ -75,6 +92,7 @@ def main():
     # 1. Load Data
     logger.info(f"Loading official evaluation dataset from {eval_data_path}...")
     eval_df = pd.read_parquet(eval_data_path)
+    validate_partition(eval_df, "Evaluation")
     logger.info(f"Loaded evaluation dataset: {eval_df.shape[0]:,} rows, {eval_df.shape[1]} columns.")
 
     # 2. Load Models
@@ -123,6 +141,7 @@ def main():
     logger.info("\n--- [Phase 5] Evaluating Seen vs Unseen Generalization ---")
     logger.info(f"Reading training dataset from {train_data_path} for exact feature hashing...")
     train_df = pd.read_parquet(train_data_path)
+    validate_partition(train_df, "Training")
     generalization_report = evaluate_seen_unseen_generalization(train_df, eval_df, threat_agent)
     save_evaluation_report("generalization", generalization_report, output_dir, metadata)
     gen_sum = generalization_report["generalization_summary"]
