@@ -107,7 +107,7 @@ def main() -> int:
         logger.warning("Submission validation skipped: --limit produced an intentionally incomplete replay.")
     else:
         errors = validate_submission_bundle(args.input, args.output_dir)
-        validation = {"valid": not errors, "status": "PASSED" if not errors else "FAILED", "errors": errors}
+        validation = {"valid": not errors, "status": "LOCAL_VALIDATION_PASSED" if not errors else "VALIDATION_FAILED", "errors": errors}
         if errors:
             logger.error("Submission validation failed with %d issue(s).", len(errors))
             for error in errors[:30]:
@@ -116,6 +116,9 @@ def main() -> int:
     validation_file.write_text(json.dumps(validation, indent=2), encoding="utf-8")
     logger.info("Wrote %s", validation_file)
     summary["submission_validation"] = validation
+    summary["ground_truth_metrics"] = None
+    summary["organizer_acceptance"] = "NOT_VERIFIED"
+    summary["disclosure"] = "The hidden replay input is unlabelled. A local validator pass does not establish attack/benign performance or organizer acceptance."
 
     # 5. summary.json
     summary_file = args.output_dir / "summary.json"
