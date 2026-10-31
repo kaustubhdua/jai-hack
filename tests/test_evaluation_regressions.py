@@ -4,12 +4,14 @@ import json
 import inspect
 from pathlib import Path
 
-import pandas as pd\nfrom types import SimpleNamespace
+import pandas as pd
+from types import SimpleNamespace
 
 from cybersentinel.evaluation.classification import evaluate_classifier
 from cybersentinel.evaluation.loao import evaluate_leave_one_attack_out
 from cybersentinel.evaluation.report import save_evaluation_report
-from cybersentinel.evaluation.temporal import evaluate_temporal_correlation\nfrom cybersentinel.agents.threat_detection.model import ThreatDetectionModel
+from cybersentinel.evaluation.temporal import evaluate_temporal_correlation
+from cybersentinel.agents.threat_detection.model import ThreatDetectionModel
 
 
 def test_classification_report_is_json_serializable_without_cycles():
