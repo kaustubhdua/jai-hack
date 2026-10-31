@@ -1,5 +1,6 @@
 """Contract tests for the current-mainline evaluation utilities."""
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -55,7 +56,7 @@ def test_temporal_evaluation_returns_explicit_summary():
         "Destination Port": [22, 23, 443],
         "label": ["BENIGN", "PORT_SCAN", "BENIGN"],
     })
-    report = evaluate_temporal_correlation(frame, test_shuffled_robustness=False)
+    report = evaluate_temporal_correlation(frame, SimpleNamespace(predict=lambda row: SimpleNamespace(predicted_class="BENIGN", confidence=0.99, status="success")), test_shuffled_robustness=False)
     assert report["evaluation_summary"]["total_flows_evaluated"] == 3
 
 
