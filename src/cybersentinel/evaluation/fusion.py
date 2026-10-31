@@ -226,11 +226,12 @@ def evaluate_classifier_vs_fusion(
         a3_fusion_results=a3_results,
     )
     a1_acc = res["a1_classification_metrics"]["accuracy"]
-    a3_acc = res["a3_fusion_classification_metrics"]["accuracy"]
+    a3_metrics = res["a3_fusion_classification_metrics"]
+    a3_acc = a3_metrics["accuracy"] if a3_metrics is not None else None
     res["summary"] = {
         "a1_accuracy": a1_acc,
         "a3_accuracy": a3_acc,
-        "net_improvement_percentage": (a3_acc - a1_acc) * 100.0,
+        "net_improvement_percentage": (a3_acc - a1_acc) * 100.0 if a3_acc is not None else None,
         "total_overrides": res["override_analysis"]["total_predictions_overridden"],
         "action_distribution": res["security_actions"]["total_actions"],
     }
