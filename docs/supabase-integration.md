@@ -28,7 +28,8 @@ The live Supabase project records the following versions. The corresponding vers
 
 - `20261031073431_add_user_scoped_cybersentinel_audit.sql`
 - `20261031074022_tighten_user_audit_table_grants.sql`
-- `20261031074154_persist_replay_decisions_policies_and_simulation_events.sql`
+- `20261031074154_persist_replay_decisions_policies_and_simulation_events.sql
+- `20261031074806_tighten_analysis_run_snapshot_permissions.sql``
 
 Earlier timestamp-named placeholder files are retained as no-ops so older checkouts do not replay already-applied schema changes.
 
