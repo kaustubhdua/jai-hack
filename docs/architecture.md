@@ -27,7 +27,7 @@ flowchart TD
 1. **Agent 1 (Threat Detection Agent):**
    - Implements supervised five-class classification (`BENIGN`, `BRUTE_FORCE`, `DOS`, `DDOS`, `PORT_SCAN`).
    - Uses the current `RandomForestClassifier` backend by default (400 estimators, `balanced_subsample` class weights); XGBoost is an optional backend. Missing and infinite numeric values are median-imputed from training data.
-   - Outputs the predicted class and maximum `predict_proba` confidence. It remains uncalibrated unless the optional scalar temperature-calibration workflow is run on a separate labelled held-out validation set.
+   - Outputs the predicted class and maximum confidence. The supported combined training workflow temperature-calibrates A1 using its default stratified holdout drawn only from the authorized training partition. If calibration is disabled with `--calibration-fraction 0`, the raw maximum `predict_proba` value is uncalibrated. The held-out evaluation partition is never used for calibration.
 
 2. **Agent 2 (Anomaly Detection Agent):**
    - Independent baseline trained strictly on benign baseline network traffic.
