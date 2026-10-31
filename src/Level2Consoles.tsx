@@ -996,7 +996,7 @@ export function ModelIntelligenceView() {
 }
 
 // ============================================================================
-// 9. AUDIT & LOCAL RUN HISTORY VIEW (SQLite Persistence)
+// 9. AUDIT & SUPABASE RUN HISTORY VIEW
 // ============================================================================
 export function AuditHistoryView() {
   const [runs, setRuns] = useState<any[]>([]);
@@ -1153,6 +1153,7 @@ export function SystemHealthView({ health }: { health: any }) {
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>A4 Temporal Correlation implementation</span>{statusTag(diagnostics.models?.agent_4_correlation_code)}</div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>A5 Adaptive Defense implementation</span>{statusTag(diagnostics.models?.agent_5_defense_code)}</div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>Local SQLite fallback</span>{statusTag(diagnostics.history_database?.present, "PRESENT")}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>Supabase cloud audit</span>{statusTag(diagnostics.supabase?.configured, "CONFIGURED")}</div>
             </div>
           </div>
 
