@@ -1,82 +1,83 @@
-# CyberSentinel — Operational Presentation Runbook
+# CyberSentinel — Current Presentation and Submission Runbook
 
-**Status:** Presenter runbook aligned to the current application and official Day 2 requirements. Rehearse from a clean local startup before presenting.
+**Status:** Use this runbook with the current `main` code and locally prepared organizer data. No model artifacts, challenge rows, completed submission files, or organizer receipt are shipped in Git.
+
+## Submission-contract gate
+
+The supplied Day 2 handout and the later downloaded stage-page templates describe different CSV names and headers. Before creating or uploading a bundle, compare the organizer's current templates with the hashes and headers in [the hidden-input audit](hidden-input-audit.md) and the contract documented in [Level 2 brief](../../docs/level2-brief.md). The repository currently implements the later stage-page templates. If the current organizer/API contract does not match those templates, stop and update the generator and validator to the organizer's confirmed contract. Never mix the two schemas.
 
 ## Before the panel
 
-1. Confirm the organiser-provided evaluation dataset is installed at `data/processed/eval_prepared.parquet`.
-2. Confirm both model artifacts exist and pass model loading.
-3. Start the FastAPI backend and Vite frontend using the repository's documented commands.
-4. Open Settings & Health and verify the API and model readiness.
-5. Run the official replay once if the panel expects pre-generated CSVs. The Replay Studio now calls the backend; it does not animate fake progress.
-6. Open Submission Studio and run the actual validator.
-7. Keep the terminal visible for any command the panel asks to inspect.
+1. Check out the latest `main` and confirm the commit that will be presented.
+2. Obtain the authorized training and hidden replay packs from the organizers; do not add them to Git.
+3. Prepare the local files and verify the supplied pack hashes:
+   ```bash
+   python scripts/prepare_challenge_data.py \
+     --training-pack cyber-pack.zip \
+     --hidden-pack cyber-hidden.zip
+   ```
+4. Install dependencies and train the models from the authorized training partition:
+   ```bash
+   python -m pip install -e ".[dev,ml]"
+   python scripts/train_models.py --train data/raw/training/flows.parquet
+   ```
+   The supported workflow uses a training-only holdout for A1 temperature calibration and fits A2 on benign training rows. It does not read hidden labels or tune from the held-out evaluation partition.
+5. Generate and validate the complete hidden replay bundle:
+   ```bash
+   python scripts/generate_submissions.py \
+     --input data/processed/hidden_replay_input.csv \
+     --output-dir outputs/submission
+   python scripts/validate_submissions.py \
+     --input data/processed/hidden_replay_input.csv \
+     --output-dir outputs/submission
+   ```
+   A limited replay is a smoke test only. A local pass does not establish organizer acceptance.
+6. Start the API and frontend using the current [README setup instructions](../../README.md). Confirm diagnostics report the actual data and model availability before claiming a model-backed demo.
 
-## Five-minute presentation walkthrough
+## Five-minute walkthrough
 
-### 00:00–00:40 — Product overview
+### 00:00–00:40 — Problem and boundaries
 
-Open Overview. Explain that CyberSentinel is an offline network-flow replay and simulated-defense product. Rotate and inspect the Three.js topology. Explain that it is an interactive architecture schematic; do not describe it as live network telemetry.
+Describe CyberSentinel as an offline network-flow replay system. The UI topology is an illustrative architecture view, not live network telemetry. No packet capture, active scanning, exploitation, or real firewall control is performed.
 
-### 00:40–01:20 — Five-agent architecture
+### 00:40–01:30 — Five agents
 
-Open Five-Agent Architecture and explain the official division:
+- **A1:** supervised prediction across BENIGN, BRUTE_FORCE, DOS, DDOS, and PORT_SCAN.
+- **A2:** independent anomaly detection trained on benign flows. Its 0–1 anomaly index is not a probability.
+- **A3:** evidence fusion with AGREE, CONFLICT, or UNCERTAIN status.
+- **A4:** chronological correlation using observed endpoints and replay metadata.
+- **A5:** temporary simulated policies with explicit activation and expiry.
 
-- A1 supervised five-class threat detection.
-- A2 independent anomaly detection.
-- A3 evidence fusion.
-- A4 temporal correlation.
-- A5 temporary simulated defense policies.
+The combined trainer temperature-calibrates A1 confidence using a holdout drawn only from training data by default. It is uncalibrated if that calibration is disabled. Do not call the anomaly index a probability.
 
-Explain the input/output contract of each agent. Do not describe A1 confidence as calibrated; the current RandomForest implementation exposes maximum `predict_proba` output, which is not calibrated.
+### 01:30–03:10 — Show a real replay
 
-### 01:20–02:00 — A1/A2 evidence and A3 fusion
+Use only results produced by the current code and authorized local inputs. Point out that A1/A2 classifications are retained for every record, even when an earlier policy blocks a later record. A newly created policy never blocks its triggering record. If models or data are unavailable, show the explicit unavailable state or a clearly labelled fixture; do not imply it is a real result.
 
-Open Flow Inspector and inspect a record or a clearly labelled test fixture. Then open Evidence Fusion. Change the A1 class/confidence and A2 score/flag and select **Run production fusion**. Explain that the result is returned by the Python `EvidenceFusionAgent`, not calculated by a duplicate frontend rule set.
+### 03:10–04:20 — Show the submission bundle
 
-### 02:00–02:45 — A4 temporal correlation
+Under the currently documented stage-page contract, the files are:
 
-Open Replay Studio and run the actual official replay if the dataset and model artifacts are present. Then open Temporal Investigations and refresh. Show only groups returned by the latest replay. If no groups are available, explain that the console is empty because no replay group has been produced; do not use fabricated sample incidents.
+- `classification.csv`: `record_id,predicted_class,anomaly_score,evidence_status`
+- `replay.csv`: `record_id,action,active_policy_id`; ALLOW uses `NONE`
+- `policies.csv`: `policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id`
 
-### 02:45–03:35 — A5 adaptive defense and causality
+The hidden replay has 200 unlabelled records. Do not report hidden-set accuracy, macro-F1, attack recall, false-block rate, or containment from it. Report labelled evaluation metrics only from the separate permitted labelled evaluation data, with the documented overlap caveat.
 
-Open Adaptive Defense. Inspect actual policy rows. Use the pre-filter tester with a scope value copied from an actual generated policy and test record positions before activation, during the active interval, and after expiry.
+### 04:20–05:00 — Limitations and acceptance
 
-Explain:
-- The policy is created after the triggering record.
-- The triggering record remains ALLOW.
-- Only later matching records can be BLOCKED while the policy is active.
-- All policy actions are simulated; no operating-system firewall is changed.
+Explain that local validation checks schema and replay semantics; it is not an organizer upload receipt. Claim successful submission only after receiving and retaining the organizer's actual successful response.
 
-### 03:35–04:30 — Replay metrics and trade-offs
+## Likely judge questions
 
-Return to Replay Studio and show the returned replay metrics. Explain attack containment, block precision, benign preservation and false blocks using their correct denominators. If the evaluation dataset is unlabelled, label-based rates are unavailable; do not invent them.
+**Why classify records that are later blocked?** The organizer requires one classification result for every input record. The replay action is a separate, chronological policy decision.
 
-### 04:30–05:00 — Submission files
+**Can a new policy block the flow that triggered it?** No. Policies activate after their trigger record and apply only to later matching records within the active window.
 
-Open Submission Studio. Run the current validator and download:
-- `classification.csv`
-- `policy.csv`
-- `replay.csv`
+**Does the hidden set establish model accuracy?** No. It has no ground-truth labels. It can be used for the prescribed replay and schema validation, not labelled performance claims.
 
-Explain that local validation is not the same as a successful upload to the organiser API. Only claim upload success after receiving an actual organiser API response.
+**Are endpoint identities invented from flow features?** No. The Level 2 replay uses only literal observed source/destination endpoints. Missing or invalid endpoints remain unknown and cannot be used to create a matching scope.
 
-## Technical points judges may ask
+**Does CyberSentinel change a real firewall?** No. ALLOW/BLOCK decisions and policies are simulated in the offline application.
 
-**Why does classification include blocked records?** The official brief requires one five-class prediction per evaluation record, including flows later blocked during replay.
-
-**Can the triggering record block itself?** No. A5 activates a policy after the triggering record; only later matching records can be blocked.
-
-**Does the system use hidden labels?** No labels are used in prediction, fusion, correlation or policy creation. Labels, when present in a permitted labelled evaluation dataset, are used only for offline metric calculation.
-
-**Are the IP values real?** The prepared evaluation parquet has no native Layer 3 source/destination IP fields. Any endpoint identity derived from flow features is synthetic/derived and collision-prone; disclose that limitation clearly.
-
-**Does CyberSentinel modify the real firewall?** No. It is an offline replay with in-memory simulated policies.
-
-## Recovery
-
-- If models are unavailable, do not claim the agents are ready. Show the health diagnostics and explain the missing artifact.
-- If the evaluation dataset is unavailable, do not claim a full replay was run. Use a clearly labelled small test fixture only to explain the code path.
-- If the API is disconnected, restart the backend and refresh the UI.
-- If WebGL is unsupported, use the 2D fallback.
-- If the organiser API is not announced, show locally generated and validated CSVs only; do not claim submission.
+**What do the AI agents contribute?** A1 and A2 produce independent learned signals; A3 combines evidence; A4 tracks chronological patterns; A5 manages simulated forward-only policy state. The three deterministic agents are not separately trained ML models.
