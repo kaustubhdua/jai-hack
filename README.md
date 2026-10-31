@@ -30,6 +30,24 @@ CyberSentinel analyzes network-flow records with two learned detectors and three
 
 Before the demo, confirm data and model readiness with diagnostics, generate the run you plan to show, and keep its report and input hashes available. Do not present archived metrics as current results or infer hidden-set performance from the unlabelled replay.
 
+### Demo walkthrough
+
+Use this path to keep the live walkthrough grounded in actual local state:
+
+```mermaid
+flowchart LR
+  START["Check diagnostics"] --> READY{"Authorized inputs and models ready?"}
+  READY -->|"Yes"| OVERVIEW["Overview + five-agent architecture"]
+  READY -->|"No"| EMPTY["Show unavailable state; skip metric claims"]
+  OVERVIEW --> FLOW["Flow Inspector"]
+  FLOW --> FUSION["Evidence Fusion<br/>label manual input as what-if"]
+  FUSION --> REPLAY["Chronological Replay Studio"]
+  REPLAY --> OUTPUTS["Review classification, replay, and policy outputs"]
+  OUTPUTS --> VALIDATE["Run independent validator"]
+  VALIDATE --> CLOSE["Close with scope and limitations"]
+  EMPTY --> CLOSE
+```
+
 ## Runtime flow
 
 A1 and A2 produce evidence for every record. The chronological gate checks policies active before that record. A blocked record remains in the classification output but does not update temporal or policy state.
@@ -122,6 +140,22 @@ flowchart LR
 - **A3–A5:** Show the documented evaluation/replay workflow, configuration, and run metadata. Do not turn unlabelled replay counts into accuracy or containment claims.
 - Record the code revision and dataset/model hashes for every run.
 - Treat reports under <code>release/</code> as historical unless explicitly identified as current contract or audit documents. Regenerate before quoting metrics.
+
+#### Match claims to evidence
+
+Use the evidence path for the claim you plan to make:
+
+```mermaid
+flowchart TD
+  CLAIM["Choose a claim"] --> KIND{"Claim type?"}
+  KIND -->|"Model performance"| LABELLED["Fresh labelled evaluation partition"]
+  LABELLED --> SCORE["Score existing models and record run hashes"]
+  SCORE --> METRICS["Report measured metrics with overlap caveat"]
+  KIND -->|"Submission contract"| HIDDEN["Unlabelled hidden replay input"]
+  HIDDEN --> VALIDATE["Generate and validate exact CSV templates"]
+  VALIDATE --> CONTRACT["Claim schema, order, and consistency only"]
+  KIND -->|"Hidden-set accuracy or live protection"| LIMIT["Unsupported by current labels and offline scope"]
+```
 
 ## Analyst console walkthrough
 
