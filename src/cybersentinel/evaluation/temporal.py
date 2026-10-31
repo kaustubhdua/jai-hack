@@ -1,178 +1,172 @@
-"""Temporal Correlation Evaluation Framework for Agent 4.
+"""Leakage-safe temporal correlation evaluation for Agent 4.
 
-Evaluates multi-flow campaign detection (DDoS convergence, horizontal Port Scans,
-and repeated Brute Force sequences), measuring detection rate, campaign precision,
-detection delay, and false campaign rates under strict chronological replay.
+Predictions from Agent 1 drive correlation. Ground-truth labels are used only
+after inference to score correlated flows. Campaign-level precision/recall is
+not claimed when the dataset has no campaign identifiers.
 """
 from __future__ import annotations
 
 import time
 from typing import Any
+
 import numpy as np
 import pandas as pd
 
 from cybersentinel.agents.correlation import TemporalCorrelationAgent
 
 
+def _prediction(agent: Any, row: dict[str, Any]) -> tuple[str | None, float | None]:
+    result = agent.predict(row)
+    predicted_class = getattr(result, "predicted_class", None)
+    confidence = getattr(result, "confidence", None)
+    status = getattr(result, "status", "success")
+    if status != "success" or not predicted_class:
+        return None, None
+    try:
+        confidence = float(confidence) if confidence is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+    return str(predicted_class).strip().upper(), confidence
+
+
 def evaluate_temporal_correlation(
     eval_df: pd.DataFrame,
+    threat_agent: Any,
     window_size: int = 150,
     test_shuffled_robustness: bool = True,
 ) -> dict[str, Any]:
-    """Chronologically evaluate TemporalCorrelationAgent on evaluation flows."""
-    agent = TemporalCorrelationAgent(window_size=window_size)
-    agent.reset()
+    """Evaluate Agent 4 using A1 predictions; labels are never fed into the agent."""
+    if "label" not in eval_df.columns:
+        raise ValueError("eval_df must contain a ground-truth 'label' column.")
+    if eval_df.empty:
+        raise ValueError("Cannot evaluate temporal correlation on an empty dataframe.")
 
-    total_flows = len(eval_df)
-    labels = eval_df["label"].astype(str).str.strip().tolist() if "label" in eval_df.columns else [""] * total_flows
-    record_ids = eval_df["record_id"].tolist() if "record_id" in eval_df.columns else list(range(total_flows))
-
-    # Keep chronological records
     records = eval_df.to_dict(orient="records")
+    labels = eval_df["label"].astype(str).str.strip().str.upper().tolist()
+    record_ids = eval_df["record_id"].tolist() if "record_id" in eval_df.columns else list(range(len(eval_df)))
 
-    correlated_flows_count = 0
+    # Sort only when every record has a parseable timestamp. Partial timestamps
+    # cannot establish a reliable total order, so preserve source order and say so.
+    parsed_times = [TemporalCorrelationAgent._parse_timestamp(row) for row in records]
+    if all(value is not None for value in parsed_times):
+        order = sorted(range(len(records)), key=lambda idx: (parsed_times[idx], idx))
+        ordering_mode = "timestamp_sorted"
+    else:
+        order = list(range(len(records)))
+        ordering_mode = "input_order_timestamps_incomplete"
+
+    predictions = [_prediction(threat_agent, records[idx]) for idx in range(len(records))]
+    agent = TemporalCorrelationAgent(window_size=window_size)
     correlated_by_ground_truth: dict[str, int] = {}
-    attack_flows_count = 0
-    benign_flows_count = 0
+    correlated_by_predicted_type: dict[str, int] = {}
+    group_ids_by_type: dict[str, set[str]] = {
+        "PORT_SCAN": set(), "DDOS": set(), "BRUTE_FORCE": set(), "DOS": set()
+    }
+    correlated_total = 0
+    benign_correlated = 0
+    attack_correlated = 0
+    prediction_errors = 0
+    detection_delays: dict[str, list[int]] = {key: [] for key in group_ids_by_type}
+    current_run_type: str | None = None
+    run_start = 0
+    run_detected = False
 
-    campaigns_detected: dict[str, list[dict[str, Any]]] = {
-        "PORT_SCAN": [],
-        "DDOS": [],
-        "BRUTE_FORCE": [],
-        "DOS": [],
+    started = time.perf_counter()
+    for position, original_idx in enumerate(order):
+        row = records[original_idx]
+        truth = labels[original_idx]
+        predicted_class, confidence = predictions[original_idx]
+        if predicted_class is None:
+            prediction_errors += 1
+
+        # Crucial: pass only the model prediction, never the ground-truth label.
+        result = agent.correlate(
+            record_ids[original_idx],
+            row,
+            threat_class=predicted_class,
+            confidence=confidence,
+        )
+
+        if truth == "BENIGN":
+            current_run_type = None
+            run_detected = False
+        elif truth in detection_delays:
+            if current_run_type != truth:
+                current_run_type = truth
+                run_start = position
+                run_detected = False
+            if result.correlated and not run_detected:
+                detection_delays[truth].append(position - run_start)
+                run_detected = True
+
+        if result.correlated:
+            correlated_total += 1
+            correlated_by_ground_truth[truth] = correlated_by_ground_truth.get(truth, 0) + 1
+            attack_correlated += int(truth != "BENIGN")
+            benign_correlated += int(truth == "BENIGN")
+            attack_type = getattr(result, "attack_type", None)
+            if attack_type:
+                correlated_by_predicted_type[attack_type] = correlated_by_predicted_type.get(attack_type, 0) + 1
+                if attack_type in group_ids_by_type and result.group_id:
+                    group_ids_by_type[attack_type].add(str(result.group_id))
+
+    elapsed = time.perf_counter() - started
+    benign_total = sum(label == "BENIGN" for label in labels)
+    attack_total = len(labels) - benign_total
+    flow_precision = attack_correlated / correlated_total if correlated_total else None
+    benign_false_correlation_rate = benign_correlated / benign_total if benign_total else None
+    all_delays = [value for values in detection_delays.values() for value in values]
+    delay_summary = {
+        attack_type: {
+            "contiguous_label_runs_detected": len(values),
+            "mean_delay_flows": float(round(float(np.mean(values)), 2)) if values else None,
+            "min_delay_flows": int(min(values)) if values else None,
+            "max_delay_flows": int(max(values)) if values else None,
+        }
+        for attack_type, values in detection_delays.items()
     }
 
-    # Tracking detection delay (flows elapsed until first trigger in an attack cluster)
-    current_attack_type: str | None = None
-    cluster_start_idx = 0
-    first_detection_idx: int | None = None
-    detection_delays: dict[str, list[int]] = {
-        "PORT_SCAN": [],
-        "DDOS": [],
-        "BRUTE_FORCE": [],
-        "DOS": [],
-    }
-
-    t0 = time.perf_counter()
-    for i, row in enumerate(records):
-        lbl = labels[i]
-        rec_id = record_ids[i]
-        is_attack = (lbl != "BENIGN")
-
-        if is_attack:
-            attack_flows_count += 1
-            if current_attack_type != lbl:
-                # New attack cluster started
-                current_attack_type = lbl
-                cluster_start_idx = i
-                first_detection_idx = None
-        else:
-            benign_flows_count += 1
-            current_attack_type = None
-            first_detection_idx = None
-
-        res = agent.correlate(rec_id, row, threat_class=lbl if is_attack else "BENIGN")
-
-        if res.correlated:
-            correlated_flows_count += 1
-            correlated_by_ground_truth[lbl] = correlated_by_ground_truth.get(lbl, 0) + 1
-
-            if is_attack and first_detection_idx is None and current_attack_type in detection_delays:
-                first_detection_idx = i
-                delay = i - cluster_start_idx
-                detection_delays[current_attack_type].append(delay)
-
-            attack_key = getattr(res, "attack_type", None) or getattr(res, "pattern", None)
-            if attack_key in campaigns_detected:
-                campaigns_detected[attack_key].append({
-                    "group_id": res.group_id,
-                    "confidence": getattr(res, "confidence", 1.0),
-                    "evidence": res.evidence,
-                })
-
-    elapsed_s = time.perf_counter() - t0
-
-    # Campaign metrics
-    total_active_groups = len(agent.active_groups)
-    benign_false_campaign_count = correlated_by_ground_truth.get("BENIGN", 0)
-    false_campaign_rate = float(round(benign_false_campaign_count / max(1, benign_flows_count), 6))
-    campaign_precision = float(round((correlated_flows_count - benign_false_campaign_count) / max(1, correlated_flows_count), 6))
-
-    # Delays summary
-    delays_summary = {}
-    for att, delays in detection_delays.items():
-        if delays:
-            delays_summary[att] = {
-                "clusters_evaluated": len(delays),
-                "mean_delay_flows": float(round(float(np.mean(delays)), 2)),
-                "min_delay_flows": int(np.min(delays)),
-                "max_delay_flows": int(np.max(delays)),
-            }
-        else:
-            delays_summary[att] = {"clusters_evaluated": 0, "mean_delay_flows": 0.0}
-
-    # Group size summary
-    group_sizes = [len(g.member_record_ids) for g in agent.active_groups.values()]
-    avg_group_size = float(round(float(np.mean(group_sizes)), 2)) if group_sizes else 0.0
-    max_group_size = int(np.max(group_sizes)) if group_sizes else 0
-
-    # Endpoints coverage
-    active_sources = len(agent.source_port_counts)
-    active_destinations = len(agent.dest_source_counts)
-
-    primary_results = {
-        "evaluation_mode": "strict_chronological_replay",
-        "total_flows_evaluated": total_flows,
-        "processing_time_seconds": float(round(elapsed_s, 3)),
-        "campaigns_detected_count": total_active_groups,
-        "correlated_flows_total": correlated_flows_count,
-        "campaign_precision": campaign_precision,
-        "false_campaign_rate_benign": false_campaign_rate,
-        "average_group_size": avg_group_size,
-        "max_group_size": max_group_size,
-        "source_coverage": active_sources,
-        "destination_coverage": active_destinations,
-        "detection_delays": delays_summary,
+    primary = {
+        "evaluation_mode": "chronological_replay_using_agent_1_predictions",
+        "ordering_mode": ordering_mode,
+        "total_flows_evaluated": len(records),
+        "processing_time_seconds": float(round(elapsed, 3)),
+        "prediction_errors": prediction_errors,
+        "correlated_flows_total": correlated_total,
         "correlation_by_ground_truth": correlated_by_ground_truth,
+        "correlation_by_predicted_type": correlated_by_predicted_type,
+        "campaigns_by_type": {key: len(value) for key, value in group_ids_by_type.items()},
+        "total_campaigns_detected": len({group_id for values in group_ids_by_type.values() for group_id in values}),
+        "correlated_flow_precision": float(round(flow_precision, 6)) if flow_precision is not None else None,
+        "benign_false_correlation_rate": float(round(benign_false_correlation_rate, 6)) if benign_false_correlation_rate is not None else None,
+        "detection_delay_by_contiguous_label_run": delay_summary,
+        "mean_detection_delay_flows": float(round(float(np.mean(all_delays)), 2)) if all_delays else None,
+        "campaign_metrics_available": False,
+        "campaign_metrics_limitation": "The supplied evaluation partition has no independently verified campaign IDs; campaign precision/recall is therefore not reported.",
     }
 
-    # Optional Shuffled Robustness Test
     shuffled_results = None
     if test_shuffled_robustness:
-        agent_shuffled = TemporalCorrelationAgent(window_size=window_size)
-        agent_shuffled.reset()
         rng = np.random.default_rng(42)
-        shuffled_indices = rng.permutation(min(20000, total_flows))
-
+        shuffled_indices = rng.permutation(len(records))[: min(20000, len(records))]
+        shuffled_agent = TemporalCorrelationAgent(window_size=window_size)
         shuffled_correlated = 0
         for idx in shuffled_indices:
-            row = records[idx]
-            lbl = labels[idx]
-            r = agent_shuffled.correlate(record_ids[idx], row, threat_class=lbl)
-            if r.correlated:
-                shuffled_correlated += 1
-
+            row = records[int(idx)]
+            predicted_class, confidence = predictions[int(idx)]
+            shuffled_result = shuffled_agent.correlate(
+                record_ids[int(idx)], row, threat_class=predicted_class, confidence=confidence
+            )
+            shuffled_correlated += int(shuffled_result.correlated)
         shuffled_results = {
-            "evaluation_mode": "shuffled_robustness_test",
+            "evaluation_mode": "shuffled_order_robustness",
             "shuffled_sample_flows": len(shuffled_indices),
             "shuffled_correlated_flows": shuffled_correlated,
-            "disruption_finding": (
-                "Temporal structure is destroyed when order is shuffled, verifying that "
-                "Agent 4 relies on causal sequence timing rather than static flow attributes."
-            ),
+            "interpretation": "Descriptive order-sensitivity check only; not a separate campaign ground-truth evaluation.",
         }
 
-    # Top-level convenience keys
-    primary_results["total_campaigns_detected"] = primary_results["campaigns_detected_count"]
-    primary_results["campaigns_by_type"] = {
-        attack_type: len({item.get("group_id") for item in items if item.get("group_id")})
-        for attack_type, items in campaigns_detected.items()
-    }
-    all_delays = [delay for values in detection_delays.values() for delay in values]
-    primary_results["mean_detection_delay_flows"] = float(round(float(np.mean(all_delays)), 2)) if all_delays else None
-
     return {
-        "evaluation_summary": primary_results,
-        "chronological_evaluation": primary_results,
+        "evaluation_summary": primary,
+        "chronological_evaluation": primary,
         "shuffled_robustness": shuffled_results,
     }
