@@ -42,3 +42,6 @@ Earlier timestamp-named placeholder files are retained as no-ops so older checko
 6. Confirm unauthenticated requests to operational API routes receive HTTP 401.
 
 A successful build alone does not complete this smoke test. The deployed app must be exercised with a real authenticated session and the organizer's real replay input.
+
+## Evaluation snapshots
+The Model Intelligence view can save a compact evaluation snapshot to `analysis_runs`. It stores metrics and report metadata only; evaluation CSVs and hidden replay data are not uploaded. The Audit History view shows replay runs and evaluation snapshots separately.

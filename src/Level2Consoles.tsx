@@ -821,6 +821,8 @@ export function ModelIntelligenceView() {
   const [evaluationReports, setEvaluationReports] = useState<any>(null);
   const [evaluationLoading, setEvaluationLoading] = useState(true);
   const [evaluationError, setEvaluationError] = useState("");
+  const [snapshotSaving, setSnapshotSaving] = useState(false);
+  const [snapshotMessage, setSnapshotMessage] = useState("");
 
   useEffect(() => {
     apiFetch("/api/evaluation/all")
@@ -843,6 +845,48 @@ export function ModelIntelligenceView() {
       .catch(err => setError(err instanceof Error ? err.message : "Benchmark report could not be loaded."))
       .finally(() => setLoading(false));
   }, []);
+
+  async function saveEvaluationSnapshot() {
+    if (!evaluationReports || evaluationReports.available_reports < 1) return;
+    setSnapshotSaving(true);
+    setSnapshotMessage("");
+    try {
+      const classification = evaluationReports.reports?.classification || {};
+      const metrics = classification.metrics || {};
+      const dataset = classification.evaluation_dataset || report?.evaluation_dataset || {};
+      const rowCount = Number(dataset.rows || dataset.total_rows || 0);
+      const response = await apiFetch("/api/evaluation/snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataset_name: dataset.name || dataset.path || "generated-evaluation-reports",
+          dataset_rows: rowCount,
+          processed_rows: rowCount,
+          status: "completed",
+          model_version: threat?.model_type || "model-artifact",
+          accuracy: typeof metrics.accuracy === "number" ? metrics.accuracy : typeof threat?.accuracy === "number" ? threat.accuracy : null,
+          macro_f1: typeof metrics.macro_f1 === "number" ? metrics.macro_f1 : typeof threat?.macro_f1 === "number" ? threat.macro_f1 : null,
+          summary: {
+            available_reports: evaluationReports.available_reports,
+            expected_reports: evaluationReports.expected_reports,
+            missing_reports: evaluationReports.missing_reports || [],
+            classification: metrics,
+            anomaly: evaluationReports.reports?.anomaly || {},
+            temporal: evaluationReports.reports?.temporal || {},
+            defense: evaluationReports.reports?.defense || {},
+          },
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail?.message || data.detail || "Could not save evaluation snapshot.");
+      if (!data.supabase_persistence?.stored) throw new Error(data.supabase_persistence?.reason || "Supabase did not confirm the snapshot.");
+      setSnapshotMessage("Evaluation snapshot saved to your private Supabase history.");
+    } catch (reason) {
+      setSnapshotMessage(reason instanceof Error ? reason.message : "Evaluation snapshot could not be saved.");
+    } finally {
+      setSnapshotSaving(false);
+    }
+  }
 
   const threat = report?.agent_1_threat_detection;
   const anomaly = report?.agent_2_anomaly_detection;
@@ -934,6 +978,12 @@ export function ModelIntelligenceView() {
           </div>
           {evaluationReports?.status === "not_generated" && <p style={{ fontSize: 11, color: "var(--muted)", margin: "12px 0 0" }}>Run <code>python scripts/evaluate_full_system.py</code> locally after preparing the authorized training/evaluation datasets and training both model artifacts. The hidden replay input is not a labelled evaluation set.</p>}
           {evaluationReports?.missing_reports?.length > 0 && <p style={{ fontSize: 10, color: "var(--muted)", margin: "8px 0 0" }}>Missing: {evaluationReports.missing_reports.join(", ")}</p>}
+          {evaluationReports?.available_reports > 0 && <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button className="secondary-btn" type="button" onClick={() => void saveEvaluationSnapshot()} disabled={snapshotSaving}>
+              {snapshotSaving ? "Saving…" : "Save evaluation snapshot to Supabase"}
+            </button>
+            {snapshotMessage && <span style={{ fontSize: 10, color: snapshotMessage.includes("saved") ? "var(--green)" : "var(--muted)" }}>{snapshotMessage}</span>}
+          </div>}
         </>}
       </div>
 
@@ -950,6 +1000,7 @@ export function ModelIntelligenceView() {
 // ============================================================================
 export function AuditHistoryView() {
   const [runs, setRuns] = useState<any[]>([]);
+  const [evaluationRuns, setEvaluationRuns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -957,6 +1008,7 @@ export function AuditHistoryView() {
       .then(res => res.json())
       .then(data => {
         setRuns(data.runs || []);
+        setEvaluationRuns(data.evaluation_runs || []);
         setLoading(false);
       })
       .catch(() => {
@@ -968,7 +1020,7 @@ export function AuditHistoryView() {
     <section className="panel dataset-panel" style={{ marginBottom: 22 }}>
       <div className="panel-head">
         <div>
-          <div className="panel-kicker">FORENSIC AUDIT TRAIL · OFFLINE SQLITE PERSISTENCE</div>
+          <div className="panel-kicker">FORENSIC AUDIT TRAIL · SUPABASE USER HISTORY</div>
           <h3>Cloud Execution & Replay Run History</h3>
           <p>
             Persisted to your private Supabase account with row-level access controls. Raw flow data and uploaded CSV files remain local.
@@ -1024,9 +1076,23 @@ export function AuditHistoryView() {
         </div>
       )}
 
+      {evaluationRuns.length > 0 && <div style={{ marginTop: 18 }}>
+        <div className="panel-kicker" style={{ marginBottom: 8 }}>MODEL EVALUATION SNAPSHOTS</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead><tr style={{ borderBottom: "1px solid var(--line)", textAlign: "left", color: "var(--muted)" }}>
+              <th style={{ padding: 8 }}>DATASET</th><th style={{ padding: 8 }}>ROWS</th><th style={{ padding: 8 }}>PROCESSED</th><th style={{ padding: 8 }}>ACCURACY</th><th style={{ padding: 8 }}>MACRO F1</th><th style={{ padding: 8 }}>STATUS</th><th style={{ padding: 8 }}>TIMESTAMP</th>
+            </tr></thead>
+            <tbody>{evaluationRuns.map(item => <tr key={item.id} style={{ borderBottom: "1px solid var(--line)" }}>
+              <td style={{ padding: 8 }}>{item.dataset_name}</td><td style={{ padding: 8 }}>{Number(item.dataset_rows).toLocaleString()}</td><td style={{ padding: 8 }}>{Number(item.processed_rows).toLocaleString()}</td>
+              <td style={{ padding: 8 }}>{typeof item.accuracy === "number" ? item.accuracy.toFixed(5) : "—"}</td><td style={{ padding: 8 }}>{typeof item.macro_f1 === "number" ? item.macro_f1.toFixed(5) : "—"}</td><td style={{ padding: 8 }}>{item.status}</td><td style={{ padding: 8, color: "var(--muted)" }}>{new Date(item.created_at).toLocaleString()}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      </div>}
       <div className="panel-foot">
         <span><LockKeyhole size={13} /> Private Supabase history · Raw network data stays local</span>
-        <span>DATABASE: public.replay_runs</span>
+        <span>DATABASE: public.replay_runs · public.analysis_runs</span>
       </div>
     </section>
   );
@@ -1067,12 +1133,12 @@ export function SystemHealthView({ health }: { health: any }) {
         <div>
           <div className="panel-kicker">SYSTEM INTEGRITY · DIAGNOSTICS & HEALTH</div>
           <h3>System Settings & Readiness Status</h3>
-          <p>Every status is read from the local backend. Missing models, datasets or generated files are shown as unavailable.</p>
+          <p>Backend, model-artifact and Supabase configuration status are shown separately. Missing models, datasets or generated files are shown as unavailable.</p>
         </div>
         <button className="secondary-btn" type="button" onClick={loadDiagnostics} disabled={loading}><RefreshCw size={14}/> Refresh diagnostics</button>
       </div>
 
-      {loading && <div className="empty-inline">Reading local artifact and service status…</div>}
+      {loading && <div className="empty-inline">Reading local artifacts and Supabase configuration…</div>}
       {error && <div className="parse-warning" role="alert">{error}</div>}
 
       {diagnostics && <>
@@ -1086,7 +1152,7 @@ export function SystemHealthView({ health }: { health: any }) {
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>A3 Evidence Fusion implementation</span>{statusTag(diagnostics.models?.agent_3_fusion_code)}</div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>A4 Temporal Correlation implementation</span>{statusTag(diagnostics.models?.agent_4_correlation_code)}</div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>A5 Adaptive Defense implementation</span>{statusTag(diagnostics.models?.agent_5_defense_code)}</div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>SQLite history database</span>{statusTag(diagnostics.history_database?.present, "PRESENT")}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 11 }}>Local SQLite fallback</span>{statusTag(diagnostics.history_database?.present, "PRESENT")}</div>
             </div>
           </div>
 
