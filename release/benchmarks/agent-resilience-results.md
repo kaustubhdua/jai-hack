@@ -1,5 +1,8 @@
 # CyberSentinel — Five-Agent Architecture & Adversarial Test Map (Corrected)
 
+> **Historical archive — not current verification.** This file preserves an earlier run and may describe obsolete models, metrics, interfaces, or CSV schemas. Do not use it as current evidence for judging, submission, or presentation claims. Regenerate results from current `main` and authorized organizer data. The current workflow is [docs/evaluation](../../docs/evaluation.md); the current Level 2 contract is [docs/level2-brief](../../docs/level2-brief.md).
+
+
 **Status:** Corrected role mapping based on current source code and the official Day 2 brief. Test results must be taken from the latest CI run, not copied from this historical report.
 
 ## Official agent responsibilities
@@ -8,7 +11,7 @@
 |---|---|---|
 | A1 | Supervised five-class threat detection | `ThreatDetectionAgent` / `ThreatDetectionModel`; source implementation uses scikit-learn RandomForest by default. |
 | A2 | Independent anomaly detection | `AnomalyDetectionAgent`; Isolation Forest model and anomaly evidence. |
-| A3 | Evidence fusion | `EvidenceFusionAgent`; combines A1 and A2, records agreement/disagreement/incomplete evidence and rationale. |
+| A3 | Evidence fusion | `EvidenceFusionAgent`; combines A1 and A2, records the current evidence states `AGREE`, `CONFLICT`, or `UNCERTAIN` and rationale. |
 | A4 | Temporal correlation | `TemporalCorrelationAgent`; sliding-window grouping using observed endpoints, ports and record order. |
 | A5 | Adaptive defense | `AdaptiveDefenseAgent`; simulated temporary ALLOW/BLOCK policy lifecycle, activation and expiry. |
 
@@ -21,7 +24,7 @@ Source: `src/cybersentinel/agents/threat_detection/model.py`
 - Five allowed classes: `BENIGN`, `BRUTE_FORCE`, `DOS`, `DDOS`, `PORT_SCAN`.
 - Numeric feature conversion removes identifier-like columns and replaces non-finite values with missing values before imputation.
 - The source default backend is RandomForest; optional XGBoost is a separate backend.
-- The returned confidence is the maximum `predict_proba` value and is **not calibrated**. Do not call it a calibrated probability.
+- The combined trainer temperature-calibrates A1 confidence on its default stratified holdout drawn from the training partition. If calibration is disabled with `--calibration-fraction 0`, the raw maximum `predict_proba` value is uncalibrated. The evaluation partition must not be used for calibration.
 - Model artifact availability and metadata must be checked at runtime.
 
 Adversarial coverage should include missing/non-finite features, unexpected columns, feature ordering, invalid labels, artifact absence/corruption and model inference failures.
@@ -66,7 +69,7 @@ Source: `src/cybersentinel/replay/engine.py`
 - Existing active policies are checked before the per-record action decision.
 - Classification output is retained for every record, including records blocked by an earlier policy.
 - The triggering record is not blocked by its own policy.
-- BLOCK references an active policy; ALLOW has an empty policy ID.
+- Under the current stage-page contract, BLOCK references an applicable active policy; ALLOW uses `active_policy_id=NONE`. This differs from the earlier handout wording.
 - Ground-truth labels are used only for offline evaluation metrics, never for inference or policy decisions.
 
 ## Test evidence
