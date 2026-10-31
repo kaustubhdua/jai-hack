@@ -142,11 +142,18 @@ export default function App() {
   function inspectFile(file?: File) {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".csv")) { setNotice("Please choose a CSV file."); return; }
+    if (file.size > 100 * 1024 * 1024) { setNotice("CSV exceeds the 100 MB browser inspection limit."); return; }
     setBusy(true); setNotice("");
     Papa.parse<Record<string, string>>(file, {
       header: true, skipEmptyLines: "greedy", dynamicTyping: false,
       complete: (result) => {
         const columns = result.meta.fields ?? [];
+        if (!columns.length || !result.data.length) {
+          setDataset(null);
+          setBusy(false);
+          setNotice("The CSV must contain a header row and at least one non-empty data row.");
+          return;
+        }
         const normalized = columns.map(c => c.trim().toLowerCase());
         const labelIndex = normalized.findIndex(c => ["label", "class", "attack", "target"].includes(c));
         const labelColumn = labelIndex >= 0 ? columns[labelIndex] : null;
@@ -264,7 +271,7 @@ export default function App() {
                   </div>
                   <span className="panel-icon"><FileSpreadsheet size={18}/></span>
                 </div>
-                <input ref={inputRef} type="file" accept=".csv,text/csv" hidden onChange={e=>inspectFile(e.target.files?.[0])}/>
+                <input ref={inputRef} type="file" accept=".csv,text/csv" hidden onChange={e=>{inspectFile(e.target.files?.[0]); e.currentTarget.value="";}}/>
                 {!dataset ? (
                   <button className="dropzone" onClick={()=>inputRef.current?.click()} disabled={busy}>
                     <div className="upload-icon"><CloudUpload size={23}/></div>
