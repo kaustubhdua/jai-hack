@@ -2,7 +2,8 @@
 
 **Audit date:** 31 October 2026  
 **Input:** organizer-provided `cyber-hidden.zip`, member `Cyber/hidden/records.csv`  
-**SHA-256:** `5b1fe3d05113c9a3bb04b27e6ae2c8802057830bea60c92923c81408c369be89`
+**Archive SHA-256:** `b59eaca11c6adf147f41b1e955ff380039c5aa21e65a00daf4d151d9adf20857`  
+**Member `Cyber/hidden/records.csv` SHA-256:** `5b1fe3d05113c9a3bb04b27e6ae2c8802057830bea60c92923c81408c369be89`
 
 ## Verified input facts
 
