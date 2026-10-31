@@ -693,7 +693,7 @@ export function ReplayStudio({ modelReady }: { modelReady: boolean }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
             {Object.entries(summary.files || {}).map(([filename, info]: [string, any]) => <button key={filename} className="secondary-btn" onClick={() => { void downloadAuthenticatedFile("/api/submissions/download/" + filename, filename).catch(reason => setError(reason instanceof Error ? reason.message : "Download failed.")); }}>{filename} · {info.rows.toLocaleString()} rows <Download size={13}/></button>)}
           </div>
-          {!summary.validation?.all_valid && <div className="parse-warning" style={{ marginTop: 12 }}>The generated files did not pass the complete validator. Inspect Submission Studio before using them.</div>}
+          {!summary.validation?.all_valid && <div className="parse-warning" style={{ marginTop: 12 }}>The generated files did not pass the complete validator. Review the generated CSV validation report before using them.</div>}
         </div>}
       </div>
 
@@ -705,111 +705,7 @@ export function ReplayStudio({ modelReady }: { modelReady: boolean }) {
   );
 }
 
-// ============================================================================
-// 7. SUBMISSION STUDIO (CSV Generation, Audit Validator & Direct Downloads)
-// ============================================================================
-export function SubmissionStudio() {
-  const [validationReport, setValidationReport] = useState<any>(null);
-  const [isValidating, setIsValidating] = useState(false);
-  const [validationError, setValidationError] = useState("");
-  const [downloadError, setDownloadError] = useState("");
-
-  async function runValidator() {
-    setIsValidating(true);
-    setValidationError("");
-    setValidationReport(null);
-    try {
-      const response = await apiFetch("/api/replay/validate");
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail?.message || data.detail || "Validator endpoint unavailable.");
-      setValidationReport(data);
-    } catch (err) {
-      setValidationError(err instanceof Error ? err.message : "Validator request failed.");
-    } finally {
-      setIsValidating(false);
-    }
-  }
-
-  async function triggerDownload(filename: string) {
-    setDownloadError("");
-    try {
-      const response = await apiFetch("/api/submissions/download/" + filename);
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.detail || filename + " has not been generated.");
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : "Download failed.");
-    }
-  }
-
-  const fileCards = [
-    { filename: "classification.csv", label: "FILE 01", description: "Five-class prediction, anomaly score, and evidence status for every record.", rows: validationReport?.classification?.row_count, header: "record_id,predicted_class,anomaly_score,evidence_status" },
-    { filename: "policies.csv", label: "FILE 02", description: "Temporary simulated policies with scope, activation, and expiry.", rows: validationReport?.policies?.policy_count, header: "policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id" },
-    { filename: "replay.csv", label: "FILE 03", description: "One chronological ALLOW/BLOCK action per record; ALLOW uses NONE and BLOCK references the smallest matching active policy ID.", rows: validationReport?.replay?.row_count, header: "record_id,action,active_policy_id" },
-  ];
-
-  return (
-    <section className="panel dataset-panel" style={{ marginBottom: 22 }}>
-      <div className="panel-head">
-        <div>
-          <div className="panel-kicker">OFFICIAL COMPETITION FILES · THREE-FILE BUNDLE</div>
-          <h3>Submission Studio & Integrity Validator</h3>
-          <p>Download and validate the generated CSV artifacts against the organiser's required headers and replay constraints.</p>
-        </div>
-        <span className="panel-icon"><Download size={18} /></span>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 14, margin: "16px 0" }}>
-        {fileCards.map(file => <div key={file.filename} style={{ background: "var(--panel2)", padding: 15, borderRadius: 8, border: "1px solid var(--line)", minWidth: 0 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 7 }}>
-            <span style={{ fontSize: 10, fontFamily: "monospace", color: "var(--blue)", fontWeight: 700 }}>{file.label}</span>
-            <span className="tag">{file.rows == null ? "NOT VERIFIED" : file.rows.toLocaleString() + " ROWS"}</span>
-          </div>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5 }}>{file.filename}</div>
-          <div style={{ fontSize: 10, color: "var(--muted)", minHeight: 42, marginBottom: 10 }}>{file.description}</div>
-          <div style={{ fontSize: 9, fontFamily: "monospace", color: "var(--muted)", background: "var(--panel)", padding: 8, borderRadius: 4, overflowWrap: "anywhere", marginBottom: 11 }}>{file.header}</div>
-          <button className="primary-btn" onClick={() => triggerDownload(file.filename)} style={{ width: "100%", fontSize: 10 }}><Download size={13}/> Download</button>
-        </div>)}
-      </div>
-
-      {downloadError && <div className="parse-warning" role="alert">{downloadError}</div>}
-
-      <div style={{ background: "var(--panel2)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
-          <div><b>Submission bundle validator</b><div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>Runs against the files currently present on the backend.</div></div>
-          <button className="secondary-btn" onClick={runValidator} disabled={isValidating}>{isValidating ? <RefreshCw size={13} className="spin-icon"/> : <Check size={13}/>} {isValidating ? "Validating…" : "Run validator"}</button>
-        </div>
-        {validationError && <div className="parse-warning" role="alert">{validationError}</div>}
-        {validationReport && <div style={{ marginTop: 12, padding: 13, background: validationReport.all_valid ? "#112a27" : "#35221f", border: "1px solid " + (validationReport.all_valid ? "#225447" : "#6a3b31"), borderRadius: 7 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, color: validationReport.all_valid ? "#9de6c6" : "#ffb4a4", fontWeight: 700, fontSize: 12, marginBottom: 9 }}>
-            <ShieldCheck size={17}/> {validationReport.status || (validationReport.all_valid ? "VALID" : "INVALID")}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10, fontSize: 10, color: "var(--muted)" }}>
-            <div>classification.csv · {validationReport.classification?.row_count ?? "—"} rows · {validationReport.classification?.total_errors ?? "—"} errors</div>
-            <div>policies.csv · {validationReport.policies?.policy_count ?? "—"} policies · {validationReport.policies?.total_errors ?? "—"} errors</div>
-            <div>replay.csv · {validationReport.replay?.row_count ?? "—"} rows · {validationReport.replay?.total_errors ?? "—"} errors</div>
-          </div>
-          {!validationReport.all_valid && <div style={{ marginTop: 9, fontSize: 10, color: "#ffb4a4" }}>Do not submit until every mandatory validator error is resolved.</div>}
-        </div>}
-      </div>
-
-      <div className="panel-foot" style={{ marginTop: 14 }}>
-        <span><LockKeyhole size={13}/> No organiser submission is claimed by local validation</span>
-        <span>READINESS IS BASED ON CURRENT BACKEND FILES</span>
-      </div>
-    </section>
-  );
-}
+// Submission Studio was removed from the command workspace.
 
 // ============================================================================
 // 8. MODEL INTELLIGENCE VIEW (Real Confusion Matrix, Per-Class Metrics, ROC/PR)
