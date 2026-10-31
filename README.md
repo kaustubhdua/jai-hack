@@ -93,23 +93,23 @@ All actions are simulated. The system does not modify a host firewall or inspect
 
 ## 5. Reproducible Local Training and Replay
 
-Install the organizer data packs into ignored local paths. The installer verifies the training/evaluation partition sizes and SHA-256 values against the supplied manifest, and validates the exact 200-row unlabelled hidden input:
+Install the project dependencies first, then install the organizer data packs into ignored local paths. The installer verifies the training/evaluation partition sizes and SHA-256 values against the supplied manifest, and validates the exact 200-row unlabelled hidden input:
 
 ```bash
+pip install -e ".[dev,ml]"
+
 python scripts/prepare_challenge_data.py \
   --training-pack cyber-pack.zip \
   --hidden-pack cyber-hidden.zip
-
-pip install -e ".[dev,ml]"
 
 # Train A1 and A2 from the authorized training partition only.
 # By default, 15% of that partition is held out for A1 confidence calibration.
 # A2 fits BENIGN rows only and sets its default threshold from benign training scores.
 python scripts/train_models.py --train data/raw/training/flows.parquet
 
-# Optional: pass --validation only when organizers provide a separate labelled
-# validation partition. Never use hidden records or the held-out evaluation split
-# for model fitting or calibration.
+# If organizers explicitly permit labelled A2 threshold tuning, pass --validation
+# and --calibrate-anomaly-threshold. Otherwise A2 remains unsupervised.
+# Never use hidden records or the held-out evaluation split for fitting/calibration.
 
 python scripts/generate_submissions.py \
   --input data/processed/hidden_replay_input.csv \
@@ -120,7 +120,13 @@ python scripts/validate_submissions.py \
   --output-dir outputs/submission
 ```
 
-The three files are `classification.csv`, `replay.csv`, and `policies.csv`. The independent validator checks exact headers, all 200 IDs and their order, the anomaly-score range, evidence taxonomy, observed endpoint scopes, activation-exclusive/expiry-inclusive policy windows, `active_policy_id=NONE` on ALLOW, and the lexicographically smallest matching policy for every BLOCK. A limited run is only a smoke test. A local validator pass is not proof of organizer acceptance.
+The three files are `classification.csv`, `replay.csv`, and `policies.csv`.
+One-command local pipeline (after installing dependencies and placing both archives in the repository root):
+
+```bash
+bash scripts/run_level2_local.sh cyber-pack.zip cyber-hidden.zip
+```
+ The independent validator checks exact headers, all 200 IDs and their order, the anomaly-score range, evidence taxonomy, observed endpoint scopes, activation-exclusive/expiry-inclusive policy windows, `active_policy_id=NONE` on ALLOW, and the lexicographically smallest matching policy for every BLOCK. A limited run is only a smoke test. A local validator pass is not proof of organizer acceptance.
 
 ---
 
