@@ -175,7 +175,8 @@ def build_master_summary(
             },
             "temporal_correlation_a4": {
                 "total_campaigns": temporal_summary.get("total_campaigns_detected"),
-                "campaign_precision": temporal_summary.get("campaign_precision"),
+                "correlated_flow_precision": temporal_summary.get("correlated_flow_precision"),
+                "campaign_metrics_available": temporal_summary.get("campaign_metrics_available", False),
                 "ddos_detected": temporal_summary.get("campaigns_by_type", {}).get("DDOS", 0),
                 "port_scan_detected": temporal_summary.get("campaigns_by_type", {}).get("PORT_SCAN", 0),
                 "mean_detection_delay_flows": temporal_summary.get("mean_detection_delay_flows"),
@@ -189,8 +190,9 @@ def build_master_summary(
             },
         },
         "audit": {
-            "all_5_agents_evaluated": True,
+            "all_5_agents_evaluated": all((classification_data, fusion_data, anomaly_data, generalization_data, calibration_data, loao_data, temporal_data, defense_data)),
             "provenance_metadata_attached": bool(metadata),
             "metrics_are_computed_from_supplied_partitions": True,
+            "temporal_campaign_ground_truth_available": temporal_summary.get("campaign_metrics_available", False),
         },
     }
