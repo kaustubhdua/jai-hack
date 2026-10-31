@@ -19,7 +19,6 @@ The publishable key is public by design. RLS and the authenticated user's JWT en
 - `replay_decisions`: per-record predicted class, anomaly index, evidence status and ALLOW/BLOCK result.
 - `replay_policies`: per-run adaptive policy scope and activation/expiry record IDs.
 - `replay_correlation_groups`: Agent 4 correlation groups, observed record membership and supporting evidence for each replay run.
-- `replay_correlation_groups`: Agent 4 groups and their observed record membership for each replay run.
 - `analysis_runs`: evaluation-run summary schema retained for the evaluation workflow.
 
 All user-owned tables use RLS with `auth.uid() = user_id`. The browser can only read and insert its own rows. The server verifies the bearer token with Supabase Auth; client-supplied user IDs are never trusted.
