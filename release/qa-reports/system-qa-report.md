@@ -1,5 +1,8 @@
 # CyberSentinel — Final Adversarial Audit & Release Hardening Report
 
+> **Historical archive — not current verification.** This file preserves an earlier run and may describe obsolete models, metrics, interfaces, or CSV schemas. Do not use it as current evidence for judging, submission, or presentation claims. Regenerate results from current `main` and authorized organizer data. The current workflow is [docs/evaluation](../../docs/evaluation.md); the current Level 2 contract is [docs/level2-brief](../../docs/level2-brief.md).
+
+
 **Project:** CyberSentinel — Multi-Agent Network Intrusion Detection & Adaptive Defense  
 **Hackathon:** JAI Agentic AI International Summit 2026 | Track 1: Agentic AI for Cybersecurity  
 **Baseline Git Commit:** `5fe21938b2df108003b85f144c45f6b22aadcbaa`  
