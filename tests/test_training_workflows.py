@@ -98,3 +98,16 @@ def test_combined_training_workflow_reloads_both_real_model_artifacts(tmp_path):
     assert manifest["a2"]["threshold_selection_source"] == "benign_training_distribution"
     assert Path(manifest["a1"]["artifact"]).is_file()
     assert Path(manifest["a2"]["artifact"]).is_file()
+
+
+def test_combined_training_workflow_rejects_training_file_as_external_validation(tmp_path):
+    training_path = tmp_path / "training.csv"
+    small_frame().to_csv(training_path, index=False)
+    with pytest.raises(ValueError, match="separate held-out partition"):
+        train_models(
+            training_path=training_path,
+            validation_path=training_path,
+            model_dir=tmp_path / "models",
+            report_dir=tmp_path / "reports",
+            n_estimators=10,
+        )
