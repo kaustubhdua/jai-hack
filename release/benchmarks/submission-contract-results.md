@@ -1,6 +1,6 @@
 # CyberSentinel — Official Level 2 Submission Contract
 
-**Source of truth:** the organizer-provided CSV templates supplied with the hidden replay set. The files are header-only templates; the replay generator must populate them without changing their exact columns or order.
+**Source of truth:** the three downloaded stage-page templates audited in [hidden-input-audit.md](hidden-input-audit.md). They are header-only; the replay generator must populate them without changing exact columns or order. These templates differ from the earlier Day 2 handout. Before upload, compare the actual current organizer/API templates with the audited hashes. If they differ, stop and update the generator and validator to match the organizer's confirmed contract.
 
 ## 1. classification.csv
 
