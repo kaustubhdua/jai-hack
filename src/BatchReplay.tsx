@@ -15,7 +15,7 @@ type BatchResponse = {
   actions: Record<"ALLOW" | "BLOCK" | "REVIEW", number>;
   results: ReplayRow[];
   class_counts: Record<string, number>;
-  supabase_persistence?: { stored: boolean; rows?: number; reason?: string };
+  supabase_persistence?: { stored: boolean; rows?: number; reason?: string; flow_events?: { stored: boolean; rows?: number; reason?: string }; agent2_rows?: number };
 };
 
 export function BatchReplay({ modelReady }: { modelReady: boolean }) {
@@ -92,7 +92,7 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
         if (!persistence?.stored) {
           aggregate.supabase_persistence = { stored: false, reason: persistence?.reason || "not_confirmed" };
         } else if (aggregate.supabase_persistence?.stored) {
-          aggregate.supabase_persistence.rows = Number(aggregate.supabase_persistence.rows || 0) + Number(persistence.rows || 0);
+          aggregate.supabase_persistence.rows = Number(aggregate.supabase_persistence.rows || 0) + Number(persistence.flow_events?.rows || 0) + Number(persistence.agent2_rows || 0);
         }
         for (const action of ["ALLOW", "BLOCK", "REVIEW"] as const) {
           aggregate.actions[action] += Number(payload.actions?.[action] || 0);

@@ -781,6 +781,7 @@ def run_official_replay(request: Request):
         (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return {
             "run_id": run_id,
+            "supabase_persistence": cloud_persistence,
             "metrics": metrics,
             "validation": validation,
             "files": {name: {"path": f"outputs/submission/{name}", "rows": len(results[key])}

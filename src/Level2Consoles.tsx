@@ -335,6 +335,7 @@ export function EvidenceFusionStudio() {
               <div className="metric-card" style={{ minHeight: 76 }}><div className="metric-label">FINAL CLASS</div><div className="metric-value" style={{ fontSize: 17 }}>{result.final_class || "—"}</div></div>
               <div className="metric-card" style={{ minHeight: 76 }}><div className="metric-label">FUSION CONFIDENCE</div><div className="metric-value" style={{ fontSize: 17 }}>{typeof result.confidence === "number" ? result.confidence.toFixed(3) : "—"}</div></div>
             </div>
+            <div className="empty-inline" style={{ marginBottom: 10 }}>Supabase audit: {result.supabase_persistence?.stored ? "Manual scenario metadata saved to your private account." : "Scenario evaluated, but cloud persistence was not confirmed (" + (result.supabase_persistence?.reason || "not reported") + ")."}</div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>Rationale from Python agent</div>
             <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text)", fontSize: 11, lineHeight: 1.7 }}>
               {(result.rationale || []).map((item: string, index: number) => <li key={index}>{item}</li>)}
@@ -549,6 +550,7 @@ export function AdaptiveDefenseConsole() {
         </div>
         {matchResult && <div role={matchResult.error ? "alert" : "status"} style={{ marginTop: 10, fontSize: 11, padding: 10, borderRadius: 6, background: matchResult.error ? "#35221f" : matchResult.matched ? "#351f25" : "#112a27", color: matchResult.error ? "#ffb4a4" : matchResult.matched ? "#ff9ba7" : "#9de6c6" }}>
           {matchResult.error || matchResult.message}
+          {!matchResult.error && <div style={{ marginTop: 6, fontSize: 10 }}>Supabase audit: {matchResult.supabase_persistence?.stored ? "Policy simulation saved." : "Persistence not confirmed (" + (matchResult.supabase_persistence?.reason || "not reported") + ")."}</div>}
         </div>}
       </div>
 
@@ -689,6 +691,11 @@ export function ReplayStudio({ modelReady }: { modelReady: boolean }) {
           </div>
           <div style={{ marginTop: 13, fontSize: 11, color: "var(--muted)" }}>
             Elapsed: {metrics.elapsed_seconds}s · Throughput: {metrics.throughput_fps?.toLocaleString()} flows/sec · Correlation groups: {summary.correlation_groups}
+          </div>
+          <div className="empty-inline" style={{ marginTop: 10 }}>
+            Supabase audit: {summary.supabase_persistence?.stored
+              ? "Replay summary, " + Number(summary.supabase_persistence.artifacts?.decisions_saved || 0).toLocaleString() + " decisions, " + Number(summary.supabase_persistence.artifacts?.policies_saved || 0).toLocaleString() + " policies and " + Number(summary.supabase_persistence.artifacts?.correlation_groups_saved || 0).toLocaleString() + " correlation groups saved."
+              : "Replay completed, but cloud persistence was not confirmed (" + (summary.supabase_persistence?.reason || "not reported") + ")."}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
             {Object.entries(summary.files || {}).map(([filename, info]: [string, any]) => <button key={filename} className="secondary-btn" onClick={() => { void downloadAuthenticatedFile("/api/submissions/download/" + filename, filename).catch(reason => setError(reason instanceof Error ? reason.message : "Download failed.")); }}>{filename} · {info.rows.toLocaleString()} rows <Download size={13}/></button>)}
