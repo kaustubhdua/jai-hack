@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect } from "react";
-import { apiFetch } from "./lib/api";
+import { apiFetch, downloadAuthenticatedFile } from "./lib/api";
 import {
   Activity, Check, Database, Download, FileSpreadsheet, Fingerprint,
   Gauge, Layers, LockKeyhole, Play, RefreshCw,
@@ -691,7 +691,7 @@ export function ReplayStudio({ modelReady }: { modelReady: boolean }) {
             Elapsed: {metrics.elapsed_seconds}s · Throughput: {metrics.throughput_fps?.toLocaleString()} flows/sec · Correlation groups: {summary.correlation_groups}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-            {Object.entries(summary.files || {}).map(([filename, info]: [string, any]) => <a key={filename} className="secondary-btn" href={"/api/submissions/download/" + filename}>{filename} · {info.rows.toLocaleString()} rows <Download size={13}/></a>)}
+            {Object.entries(summary.files || {}).map(([filename, info]: [string, any]) => <button key={filename} className="secondary-btn" onClick={() => { void downloadAuthenticatedFile("/api/submissions/download/" + filename, filename).catch(reason => setError(reason instanceof Error ? reason.message : "Download failed.")); }}>{filename} · {info.rows.toLocaleString()} rows <Download size={13}/></button>)}
           </div>
           {!summary.validation?.all_valid && <div className="parse-warning" style={{ marginTop: 12 }}>The generated files did not pass the complete validator. Inspect Submission Studio before using them.</div>}
         </div>}
