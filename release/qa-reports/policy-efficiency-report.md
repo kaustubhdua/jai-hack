@@ -1,5 +1,8 @@
 # Policy Generation Efficiency & Optimization Report
 
+> **Historical archive — not current verification.** This file preserves an earlier run and may describe obsolete models, metrics, interfaces, or CSV schemas. Do not use it as current evidence for judging, submission, or presentation claims. Regenerate results from current `main` and authorized organizer data. The current workflow is [docs/evaluation](../../docs/evaluation.md); the current Level 2 contract is [docs/level2-brief](../../docs/level2-brief.md).
+
+
 **Analysis Period:** Pre-Audit vs. Post-Audit Hardening  
 **Dataset:** 114,185 Flows (`eval_prepared.parquet`)  
 **Core Finding:** Policy count reduced by 76.2% (85,749 -> 20,368) while attack containment increased by 500% (8,035 -> 48,264).  
