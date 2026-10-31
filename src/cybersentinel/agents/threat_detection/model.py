@@ -14,6 +14,10 @@ from sklearn.preprocessing import LabelEncoder
 BENCHMARK_CLASSES = ("BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN")
 ARTIFACT_FORMAT_VERSION = 1
 DEFAULT_DROP_COLUMNS = {"recordid", "flowid", "sourceip", "destinationip", "srcip", "dstip", "timestamp"}
+# Organizer replay metadata is for ordering/correlation, never a supervised feature.
+# Match exact snake_case metadata names so the CICIDS feature "Destination Port"
+# (with a space) remains a legitimate one of the 78 numeric flow features.
+REPLAY_METADATA_COLUMNS = {"seq", "day", "time_offset", "source_port", "destination_port", "protocol"}
 
 def _key(value: Any) -> str:
     return "".join(ch for ch in str(value).casefold() if ch.isalnum())
@@ -23,7 +27,8 @@ def numeric_features(frame: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(frame, pd.DataFrame):
         frame = pd.DataFrame(frame)
     data = frame.loc[:, ~frame.columns.duplicated()].copy()
-    drop = [c for c in data.columns if _key(c) in DEFAULT_DROP_COLUMNS]
+    drop = [c for c in data.columns
+            if _key(c) in DEFAULT_DROP_COLUMNS or str(c).strip().casefold() in REPLAY_METADATA_COLUMNS]
     if drop:
         data = data.drop(columns=drop)
     converted = {}
