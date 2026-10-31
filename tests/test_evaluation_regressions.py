@@ -4,7 +4,7 @@ import json
 import inspect
 from pathlib import Path
 
-import pandas as pd
+import pandas as pd\nfrom types import SimpleNamespace
 
 from cybersentinel.evaluation.classification import evaluate_classifier
 from cybersentinel.evaluation.loao import evaluate_leave_one_attack_out
@@ -51,7 +51,28 @@ def test_temporal_evaluation_represents_unobserved_delay_as_none():
         "Destination Port": [80, 443],
         "label": ["BENIGN", "DOS"],
     })
-    report = evaluate_temporal_correlation(frame, test_shuffled_robustness=False)
+    report = evaluate_temporal_correlation(frame, SimpleNamespace(predict=lambda row: SimpleNamespace(predicted_class="BENIGN", confidence=0.99, status="success")), test_shuffled_robustness=False)
     summary = report["evaluation_summary"]
     assert summary["campaigns_by_type"]["DDOS"] == 0
     assert summary["mean_detection_delay_flows"] is None
+
+
+def test_temporal_evaluation_never_feeds_ground_truth_labels_to_agent():
+    seen = []
+    class Predictor:
+        def predict(self, row):
+            # The evaluator must not pass labels into this call.
+            assert "label" not in row or row["label"] in {"BENIGN", "DOS"}
+            seen.append(row["label"])
+            return type("Prediction", (), {"predicted_class": "BENIGN", "confidence": 0.99, "status": "success"})()
+
+    frame = pd.DataFrame({
+        "record_id": ["a", "b", "c", "d", "e"],
+        "source_ip": ["192.0.2.1"] * 5,
+        "Destination Port": [21, 22, 23, 24, 25],
+        "label": ["PORT_SCAN"] * 5,
+    })
+    report = evaluate_temporal_correlation(frame, Predictor(), test_shuffled_robustness=False)
+    assert len(seen) == len(frame)
+    assert report["evaluation_summary"]["correlated_flows_total"] == 0
+    assert report["evaluation_summary"]["campaign_metrics_available"] is False
