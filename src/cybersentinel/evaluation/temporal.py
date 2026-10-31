@@ -55,7 +55,8 @@ def evaluate_temporal_correlation(
         order = list(range(len(records)))
         ordering_mode = "input_order_timestamps_incomplete"
 
-    inference_records = [{key: value for key, value in row.items() if key != "label"} for row in records]\n    predictions = [_prediction(threat_agent, inference_records[idx]) for idx in range(len(records))]
+    inference_records = [{key: value for key, value in row.items() if key != "label"} for row in records]
+    predictions = [_prediction(threat_agent, inference_records[idx]) for idx in range(len(records))]
     agent = TemporalCorrelationAgent(window_size=window_size)
     correlated_by_ground_truth: dict[str, int] = {}
     correlated_by_predicted_type: dict[str, int] = {}
@@ -82,7 +83,7 @@ def evaluate_temporal_correlation(
         # Crucial: pass only the model prediction, never the ground-truth label.
         result = agent.correlate(
             record_ids[original_idx],
-            row,
+            inference_records[original_idx],
             threat_class=predicted_class,
             confidence=confidence,
         )
