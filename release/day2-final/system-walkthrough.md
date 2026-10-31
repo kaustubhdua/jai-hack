@@ -1,5 +1,8 @@
 # CyberSentinel — Technical Presentation & System Walkthrough
 
+> **Historical archive — not current verification.** This file preserves an earlier run and may describe obsolete models, metrics, interfaces, or CSV schemas. Do not use it as current evidence for judging, submission, or presentation claims. Regenerate results from current `main` and authorized organizer data. The current workflow is [docs/evaluation](../../docs/evaluation.md); the current Level 2 contract is [docs/level2-brief](../../docs/level2-brief.md).
+
+
 ## JAI 2026 | Track 1: Agentic AI for Cybersecurity
 **Duration:** 5 Minutes | **Format:** Live Technical Walkthrough & Architecture Defense Before the Panel
 
