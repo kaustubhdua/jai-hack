@@ -1,4 +1,4 @@
-> **Archive notice:** This directory records a prior Day 2 release snapshot. Its operational status, metrics, test counts, and CSV validation refer to that earlier environment; they are not current verification for `main`. Current data, model, and generated submission artifacts are not committed. Re-run checks against the current branch before citing any result.
+> **Archive notice:** This directory records a prior Day 2 release snapshot. Its operational status, metrics, test counts, and CSV validation refer to that earlier environment; they are not current verification for `main`. Current data, model, and generated submission artifacts are not committed. Re-run checks against the current branch before citing any result. This snapshot uses the earlier `policy.csv` contract; it is not a current submission template. See [the current Level 2 contract](../../docs/level2-brief.md) and verify it against the organizer's latest files.
 
 # CyberSentinel — Day 2 Final Release Package
 
