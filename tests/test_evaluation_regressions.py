@@ -62,8 +62,8 @@ def test_temporal_evaluation_never_feeds_ground_truth_labels_to_agent():
     class Predictor:
         def predict(self, row):
             # The evaluator must not pass labels into this call.
-            assert "label" not in row or row["label"] in {"BENIGN", "DOS"}
-            seen.append(row["label"])
+            assert "label" not in row
+            seen.append("called")
             return type("Prediction", (), {"predicted_class": "BENIGN", "confidence": 0.99, "status": "success"})()
 
     frame = pd.DataFrame({
