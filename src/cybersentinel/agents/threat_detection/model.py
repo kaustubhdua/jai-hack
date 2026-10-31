@@ -13,7 +13,7 @@ from sklearn.preprocessing import LabelEncoder
 
 BENCHMARK_CLASSES = ("BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN")
 ARTIFACT_FORMAT_VERSION = 1
-DEFAULT_DROP_COLUMNS = {"recordid", "flowid", "sourceip", "destinationip", "srcip", "dstip", "timestamp"}
+DEFAULT_DROP_COLUMNS = {"recordid", "flowid", "sourceip", "destinationip", "srcip", "dstip", "timestamp", "label"}
 # Organizer replay metadata is for ordering/correlation, never a supervised feature.
 # Match exact snake_case metadata names so the CICIDS feature "Destination Port"
 # (with a space) remains a legitimate one of the 78 numeric flow features.
@@ -111,7 +111,8 @@ class ThreatDetectionModel:
             "sklearn_version": sklearn.__version__, "training_rows": int(len(y)),
             "class_counts": {str(k): int(v) for k, v in counts.items()},
             "feature_count": len(self.feature_columns), "feature_columns": self.feature_columns,
-            "excluded_identifier_columns": sorted(DEFAULT_DROP_COLUMNS),
+            "excluded_identifier_columns": sorted(DEFAULT_DROP_COLUMNS - {"label"}),
+            "excluded_target_columns": ["label"],
             "random_state": self.random_state,
             "confidence_definition": "maximum predict_proba value when temperature=1; temperature-scaled value after held-out validation calibration",
             "confidence_calibrated": False,
