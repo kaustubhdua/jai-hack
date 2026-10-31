@@ -41,9 +41,15 @@ def _numeric_frame(frame: pd.DataFrame) -> pd.DataFrame:
         frame = pd.DataFrame(frame)
     data = frame.loc[:, ~frame.columns.duplicated()].copy()
     excluded = {"recordid", "label", "flowid", "sourceip", "destinationip", "srcip", "dstip", "timestamp"}
+    # Exact organizer metadata names are excluded without dropping the CICIDS
+    # feature "Destination Port" (space-separated) from the 78-feature vector.
+    replay_metadata = {"seq", "day", "time_offset", "source_port", "destination_port", "protocol"}
     def normalized(name: Any) -> str:
         return "".join(ch for ch in str(name).casefold() if ch.isalnum())
-    data = data.drop(columns=[c for c in data.columns if normalized(c) in excluded], errors="ignore")
+    data = data.drop(columns=[
+        c for c in data.columns
+        if normalized(c) in excluded or str(c).strip().casefold() in replay_metadata
+    ], errors="ignore")
     numeric = {}
     for col in data.columns:
         values = pd.to_numeric(data[col], errors="coerce").replace([np.inf, -np.inf], np.nan)
