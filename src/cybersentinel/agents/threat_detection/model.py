@@ -46,12 +46,13 @@ class ThreatDetectionModel:
     Confidence is max predict_proba output; it is model-derived but not calibrated.
     """
     def __init__(self, backend="random_forest", random_state=42, n_estimators=400,
-                 max_depth=None, min_samples_leaf=2, n_jobs=-1):
+                 max_depth=None, min_samples_leaf=2, n_jobs=-1, allow_missing_classes=False):
         if backend not in {"random_forest", "xgboost"}:
             raise ValueError("backend must be random_forest or xgboost")
         self.backend, self.random_state = backend, int(random_state)
         self.n_estimators, self.max_depth = int(n_estimators), max_depth
         self.min_samples_leaf, self.n_jobs = int(min_samples_leaf), int(n_jobs)
+        self.allow_missing_classes = bool(allow_missing_classes)
         self.estimator = self.imputer = self.label_encoder = None
         self.calibration_temperature = 1.0
         self.feature_columns: list[str] = []
@@ -69,7 +70,7 @@ class ThreatDetectionModel:
         if unknown:
             raise ValueError(f"Labels outside the five benchmark classes: {unknown}")
         missing = sorted(set(BENCHMARK_CLASSES) - set(y.unique()))
-        if missing:
+        if missing and not self.allow_missing_classes:
             raise ValueError(f"Training data must contain all five benchmark classes; missing: {missing}")
         # Feature selection is fitted on training data only; validation never changes this schema.
         self.feature_columns = [str(c) for c in x.columns if x[c].nunique(dropna=True) > 1]
@@ -110,6 +111,9 @@ class ThreatDetectionModel:
             "artifact_format_version": ARTIFACT_FORMAT_VERSION, "backend": self.backend,
             "sklearn_version": sklearn.__version__, "training_rows": int(len(y)),
             "class_counts": {str(k): int(v) for k, v in counts.items()},
+            "training_classes": sorted(str(value) for value in y.unique()),
+            "allow_missing_classes": self.allow_missing_classes,
+            "missing_training_classes": missing,
             "feature_count": len(self.feature_columns), "feature_columns": self.feature_columns,
             "excluded_identifier_columns": sorted(DEFAULT_DROP_COLUMNS - {"label"}),
             "excluded_target_columns": ["label"],
@@ -209,7 +213,7 @@ class ThreatDetectionModel:
             "calibration_temperature": self.calibration_temperature,
             "config": {"random_state": self.random_state, "n_estimators": self.n_estimators,
                        "max_depth": self.max_depth, "min_samples_leaf": self.min_samples_leaf,
-                       "n_jobs": self.n_jobs},
+                       "n_jobs": self.n_jobs, "allow_missing_classes": self.allow_missing_classes},
         }
         fd, temporary = tempfile.mkstemp(prefix=destination.name, suffix=".tmp", dir=str(destination.parent))
         os.close(fd)
