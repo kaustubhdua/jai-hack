@@ -1,56 +1,76 @@
 # Five-agent training and verification
 
-CyberSentinel has **two learned detection models** and **three deterministic response agents**. Do not describe Agents 3–5 as machine-learning models that need dataset training.
+CyberSentinel has **two learned detection models** and **three deterministic response agents**. Agents 3–5 do not need dataset training.
 
-## Agent 1 — supervised threat detection
+## Supported training workflow
 
-Train the five-class Random Forest with the repository's trainer:
-
-```bash
-python -m cybersentinel.agents.threat_detection.train --train data/processed/training_prepared.parquet --label-column label --model-out models/threat_detection/model.joblib
-```
-
-Use a separate labelled validation split with `--validation` and `--validation-label-column label` where available. Do not use `record_id` as a feature. The model requires all five canonical labels.
-
-## Agent 2 — benign-baseline anomaly detection
-
-Train from the official training partition only. The trainer selects BENIGN rows itself; it never trains on attack rows:
+Prepare the organizer packs and install the project's ML dependencies:
 
 ```bash
-python -m cybersentinel.agents.anomaly_detection.train --train data/processed/training_prepared.parquet --validation data/processed/eval_prepared.parquet
+python scripts/prepare_challenge_data.py \
+  --training-pack cyber-pack.zip \
+  --hidden-pack cyber-hidden.zip
+
+python -m pip install -e ".[dev,ml]"
 ```
 
-The validation report measures benign false-positive rate and attack detection rate. The threshold is the 1st percentile of training-benign Isolation Forest decision scores. Anomaly scores are not probabilities.
-
-### Importing the earlier standalone Agent 2 artifact
-
-The repository currently tracks one legacy teammate-supplied Agent 2 artifact at `models/model.native.joblib`. It is not loaded automatically and is not the versioned runtime artifact expected by the API. If (and only if) you trust its provenance, convert it before placing it at the API's expected path:
+Train both learned agents from the authorized training partition:
 
 ```bash
-python scripts/import_agent2_artifact.py --source models/model.native.joblib --destination models/anomaly_detection/model.joblib
+python scripts/train_models.py \
+  --train data/raw/training/flows.parquet
 ```
 
-Joblib uses Python pickle serialization and loading it can execute code. Do not import artifacts from unknown sources. The adapter preserves the stored threshold and legacy zero-fill preprocessing. It cannot reconstruct the old training distribution's feature profiles, so feature-level anomaly explanations are unavailable for imported artifacts. Prefer retraining with the native Agent 2 trainer. This legacy artifact does not provide Agent 1; train Agent 1 separately from the authorized labelled training partition. Do not commit additional trained binary artifacts or organizer data.
+By default, the combined trainer makes a deterministic stratified 15% holdout from the training partition. A1 is fitted on the remaining training rows and its confidence is temperature-calibrated on that training-only holdout. A2 is fitted on BENIGN rows from its model-fit subset and derives its default threshold from those benign training scores. The training command does not read the held-out evaluation partition or the hidden replay input.
 
-## Agent 3 — evidence fusion
+The saved artifacts are written locally to `models/threat_detection/model.joblib` and `models/anomaly_detection/model.joblib`; generated models are ignored by Git. Do not commit organizer data, fitted artifacts, or generated reports.
 
-No model training. This deterministic arbiter combines Agent 1 class/confidence and Agent 2 anomaly flag/score into AGREE, DISAGREE, or INCOMPLETE and simulated ALLOW/BLOCK/REVIEW. Incomplete evidence defaults to REVIEW.
+## Optional anomaly threshold selection
 
-## Agent 4 — temporal correlation
+Use label-based A2 threshold selection only if organizers explicitly permit it and supply a separate labelled validation partition. Pass that file with `--validation` and opt in with `--calibrate-anomaly-threshold`. Do not use the held-out evaluation partition or hidden replay input to select a threshold. The default workflow does not use attack labels to set A2's threshold.
 
-No model training. This stateful rule-based correlator uses a 150-flow sliding window and endpoint evidence to identify port scans, DDoS/DoS patterns, and repeated authentication attempts. Its effectiveness must be validated with chronological replay scenarios; it is not trained with labels.
+The separate `scripts/train_anomaly.py` entry point supports lower-level A2 training and can calibrate its threshold when a validation file is provided. Treat that option as model selection: use it only with an explicitly permitted, separate labelled validation set, never the official held-out evaluation data.
 
-## Agent 5 — adaptive defense
+## Evaluation
 
-No model training. This policy lifecycle manager checks previously activated simulated policies, creates temporary forward-looking source-identity policies, and expires them. Validate causality (a flow cannot block itself) and expiry with replay tests. It never modifies the host firewall.
+Use the evaluation command only after training to measure performance on the untouched labelled evaluation partition:
+
+```bash
+python scripts/evaluate_benchmark.py \
+  --eval data/raw/evaluation/flows.parquet \
+  --threat-model models/threat_detection/model.joblib \
+  --anomaly-model models/anomaly_detection/model.joblib \
+  --output reports/generated/official_evaluation.json
+```
+
+This evaluation step scores existing artifacts; it must not fit models, calibrate confidence, or select thresholds. Report the documented repeated-feature overlap caveat with any result. See [Model Training, Evaluation and Hidden Replay](evaluation.md) for the full data boundary and reproducibility requirements.
+
+## Agent responsibilities
+
+- **Agent 1:** supervised five-class threat classifier.
+- **Agent 2:** independent BENIGN-baseline anomaly detector; its exported 0–1 index is higher for more anomalous flows and is not a probability.
+- **Agent 3:** deterministic evidence fusion; emits `AGREE`, `CONFLICT`, or `UNCERTAIN`.
+- **Agent 4:** chronological, bounded temporal correlation using observed replay fields.
+- **Agent 5:** forward-only simulated policy lifecycle. A policy cannot block its own triggering record and never changes a real firewall.
+
+Agents 3–5 are tested through the repository's code tests and chronological replay validation; they are not trained on labels.
+
+## Legacy artifact importer
+
+No trained model binary is shipped in the current repository tree. The optional `scripts/import_agent2_artifact.py` utility is for a separately supplied legacy artifact only. Joblib uses Python pickle serialization, so loading an untrusted file can execute code. Verify its provenance independently, use an isolated trusted environment, and prefer retraining with the supported workflow. Importing an A2 artifact does not provide the A1 model or make the full runtime ready.
 
 ## Full-system verification
 
-After installing both versioned artifacts at the paths above:
+After preparing authorized data and training both models:
 
 ```bash
 python -m pytest tests -q
-python scripts/reproduce_benchmarks.py
+python scripts/generate_submissions.py \
+  --input data/processed/hidden_replay_input.csv \
+  --output-dir outputs/submission
+python scripts/validate_submissions.py \
+  --input data/processed/hidden_replay_input.csv \
+  --output-dir outputs/submission
 ```
 
-The benchmark requires the organizer-provided evaluation parquet at `data/processed/eval_prepared.parquet`. Keep the evaluation split untouched; report the documented cross-split repeated-feature overlap when presenting metrics. Never commit organizer datasets or trained binary model artifacts to Git.
+The hidden replay is unlabelled. Do not calculate or claim hidden-set accuracy, macro-F1, false-block rate, attack recall, or containment from it. A local validator pass is not proof of organizer acceptance; retain the exact input hashes and only claim acceptance after an actual organizer response or receipt.
