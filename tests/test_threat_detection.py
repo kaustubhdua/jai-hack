@@ -87,3 +87,22 @@ def test_validation_temperature_calibration_is_persisted(tmp_path):
     restored = ThreatDetectionAgent.load(artifact)
     assert restored.model.calibration_temperature == agent.model.calibration_temperature
     assert restored.model.metadata["confidence_calibrated"] is True
+
+def test_organizer_replay_metadata_is_not_a_supervised_feature():
+    frame = pd.DataFrame({
+        "seq": [1, 2, 3],
+        "day": ["2017-07-04"] * 3,
+        "time_offset": ["00:49.8", "02:14.1", "02:39.9"],
+        "source_ip": ["192.168.10.12", "192.168.10.5", "192.168.10.17"],
+        "destination_ip": ["192.168.10.3"] * 3,
+        "source_port": [51001, 51002, 51003],
+        "destination_port": [80, 443, 22],
+        "protocol": [6, 6, 6],
+        "Destination Port": [80, 443, 22],
+        "Flow Duration": [100, 200, 300],
+    })
+    features = numeric_features(frame)
+    assert list(features.columns) == ["Destination Port", "Flow Duration"]
+    assert "destination_port" not in features.columns
+    assert "seq" not in features.columns
+    assert "protocol" not in features.columns
