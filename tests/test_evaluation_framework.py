@@ -1,5 +1,6 @@
 """Contract tests for the current-mainline evaluation utilities."""
-from pathlib import Path\nfrom types import SimpleNamespace
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
