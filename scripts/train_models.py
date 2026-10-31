@@ -65,6 +65,8 @@ def train_models(
         validation_path = Path(validation_path)
         if not validation_path.is_file():
             raise FileNotFoundError(f"Labelled validation partition not found: {validation_path}")
+        if training_path.resolve() == validation_path.resolve() or _sha256(training_path) == _sha256(validation_path):
+            raise ValueError("Validation must be a separate held-out partition; the training file cannot be reused as validation.")
         validation_source = "organizer_provided_labelled_validation"
     else:
         validation_source = "internal_stratified_holdout_from_training_partition"
