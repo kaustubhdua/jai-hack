@@ -71,6 +71,17 @@ class SubmissionValidator:
         if len(expected_records) != row_count:
             issues.append(f"Row count mismatch: expected {len(expected_records)}, got {row_count}")
 
+        # Exact ID set validation
+        expected_set = {str(r) for r in expected_records}
+        seen_set = {str(r) for r in seen_records}
+        if seen_set != expected_set:
+            missing = list(expected_set - seen_set)[:5]
+            unexpected = list(seen_set - expected_set)[:5]
+            if missing:
+                issues.append(f"Missing expected record IDs (sample): {missing}")
+            if unexpected:
+                issues.append(f"Unexpected record IDs (sample): {unexpected}")
+
         return {
             "file": file_path.name,
             "valid": len(issues) == 0,
@@ -90,12 +101,12 @@ class SubmissionValidator:
 
         with file_path.open("r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            required_cols = [
-                "policy_id", "activated_after_record_id", "scope_type",
-                "scope_value", "expires_after_record_id", "policy_action"
+            valid_headers = [
+                ["policy_id", "activated_after_record_id", "scope_type", "scope_value", "expires_after_record_id", "policy_action"],
+                ["policy_id", "activated_after_record_id", "scope_type", "scope_value", "expires_after_record_id"],
             ]
-            if reader.fieldnames != required_cols:
-                issues.append(f"Header mismatch. Expected {required_cols}, found {reader.fieldnames}")
+            if reader.fieldnames not in valid_headers:
+                issues.append(f"Header mismatch. Expected one of {valid_headers}, found {reader.fieldnames}")
 
             for idx, row in enumerate(reader):
                 row_count += 1
@@ -110,7 +121,7 @@ class SubmissionValidator:
                 if scope_type != "SOURCE_IP":
                     issues.append(f"Row {idx}: Scope type must be SOURCE_IP, got '{scope_type}'")
 
-                if action != "BLOCK":
+                if action is not None and action != "BLOCK":
                     issues.append(f"Row {idx}: Policy action must be BLOCK, got '{action}'")
 
         return {
@@ -139,15 +150,18 @@ class SubmissionValidator:
 
         with file_path.open("r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            required_cols = ["record_id", "action", "applied_policy_id"]
-            if reader.fieldnames != required_cols:
-                issues.append(f"Header mismatch. Expected {required_cols}, found {reader.fieldnames}")
+            valid_headers = [
+                ["record_id", "action", "applied_policy_id"],
+                ["record_id", "action", "active_policy_id"],
+            ]
+            if reader.fieldnames not in valid_headers:
+                issues.append(f"Header mismatch. Expected one of {valid_headers}, found {reader.fieldnames}")
 
             for idx, row in enumerate(reader):
                 row_count += 1
                 rec_id = row.get("record_id")
                 action = row.get("action")
-                applied_pol = row.get("applied_policy_id", "").strip()
+                applied_pol = (row.get("applied_policy_id") or row.get("active_policy_id") or "").strip()
 
                 if rec_id in seen_records:
                     issues.append(f"Row {idx}: Duplicate record_id '{rec_id}'")
@@ -169,6 +183,17 @@ class SubmissionValidator:
 
         if len(expected_records) != row_count:
             issues.append(f"Row count mismatch: expected {len(expected_records)}, got {row_count}")
+
+        # Exact ID set validation
+        expected_set = {str(r) for r in expected_records}
+        seen_set = {str(r) for r in seen_records}
+        if seen_set != expected_set:
+            missing = list(expected_set - seen_set)[:5]
+            unexpected = list(seen_set - expected_set)[:5]
+            if missing:
+                issues.append(f"Missing expected record IDs (sample): {missing}")
+            if unexpected:
+                issues.append(f"Unexpected record IDs (sample): {unexpected}")
 
         return {
             "file": file_path.name,

@@ -1,6 +1,7 @@
 """Agent 1 adapter; preserves the existing pipeline's .predict(flow) interface."""
 from pathlib import Path
 from typing import Any
+import numpy as np
 import pandas as pd
 from cybersentinel.contracts import ThreatDetectionResult
 from .model import ThreatDetectionModel
@@ -27,6 +28,11 @@ class ThreatDetectionAgent:
         if self.model is None:
             raise RuntimeError("ThreatDetectionAgent has no trained model.")
         return self.model.predict_frame(flows)
+
+    def predict_proba_canonical(self, flows: pd.DataFrame) -> np.ndarray:
+        if self.model is None:
+            raise RuntimeError("ThreatDetectionAgent has no trained model.")
+        return self.model.predict_proba_canonical(flows)
 
     def save(self, path: str | Path) -> Path:
         if self.model is None:

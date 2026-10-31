@@ -868,95 +868,9 @@ export function SubmissionStudio() {
 }
 
 // ============================================================================
-// 8. MODEL INTELLIGENCE VIEW (Real Confusion Matrix, Per-Class Metrics, ROC/PR)
+// 8. MODEL INTELLIGENCE VIEW (Full 5-Agent Evaluation Suite & Diagnostics)
 // ============================================================================
-export function ModelIntelligenceView() {
-  const [report, setReport] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    fetch("/api/benchmarks")
-      .then(async response => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail?.message || data.detail || "No generated benchmark report is available.");
-        setReport(data.verified_report || null);
-      })
-      .catch(err => setError(err instanceof Error ? err.message : "Benchmark report could not be loaded."))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const threat = report?.agent_1_threat_detection;
-  const anomaly = report?.agent_2_anomaly_detection;
-  const classes: string[] = threat?.class_order || [];
-  const matrix: number[][] | null = Array.isArray(threat?.confusion_matrix) ? threat.confusion_matrix : null;
-  const perClass = threat?.per_class || {};
-  const pct = (value: unknown) => typeof value === "number" ? (value * 100).toFixed(3) + "%" : "—";
-
-  return (
-    <section className="panel dataset-panel" style={{ marginBottom: 22 }}>
-      <div className="panel-head">
-        <div>
-          <div className="panel-kicker">MODEL EVALUATION · GENERATED BENCHMARK REPORT</div>
-          <h3>Model Intelligence & Diagnostics</h3>
-          <p>Displays metrics only when a benchmark report is available. Confidence is model-derived and not probability-calibrated.</p>
-        </div>
-        <span className="panel-icon"><Gauge size={18} /></span>
-      </div>
-
-      {loading && <div className="empty-inline" style={{ marginTop: 15 }}>Loading benchmark report…</div>}
-      {error && <div className="parse-warning" role="alert" style={{ marginTop: 15 }}>{error}</div>}
-
-      {report && <>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, margin: "16px 0" }}>
-          {[
-            ["A1 ACCURACY", pct(threat?.accuracy)],
-            ["A1 MACRO F1", typeof threat?.macro_f1 === "number" ? threat.macro_f1.toFixed(6) : "—"],
-            ["A2 BENIGN FPR", pct(anomaly?.benign_false_positive_rate)],
-            ["A1 INFERENCE", typeof threat?.inference_ms_per_flow === "number" ? threat.inference_ms_per_flow.toFixed(4) + " ms/flow" : "—"],
-          ].map(([label, value]) => <div key={label} style={{ background: "var(--panel2)", padding: 13, borderRadius: 8, border: "1px solid var(--line)" }}><small style={{ fontSize: 9, color: "var(--muted)" }}>{label}</small><div style={{ fontSize: 19, fontWeight: 700, marginTop: 5 }}>{value}</div></div>)}
-        </div>
-
-        {matrix && <div style={{ background: "var(--panel2)", padding: 15, borderRadius: 8, border: "1px solid var(--line)", marginBottom: 15 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>A1 multiclass confusion matrix · {report.evaluation_dataset?.rows?.toLocaleString() ?? "—"} evaluation rows</div>
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10, textAlign: "center" }}>
-            <thead><tr style={{ borderBottom: "1px solid var(--line)", color: "var(--muted)" }}><th style={{ textAlign: "left", padding: 8 }}>TRUE / PREDICTED</th>{classes.map(value => <th key={value} style={{ padding: 8 }}>{value}</th>)}</tr></thead>
-            <tbody>{classes.map((value, row) => <tr key={value} style={{ borderBottom: "1px solid var(--line)" }}>
-              <td style={{ textAlign: "left", padding: 8, fontWeight: 600 }}>{value}</td>
-              {(matrix[row] || []).map((count, col) => <td key={col} style={{ padding: 8, fontFamily: "monospace", fontWeight: row === col ? 700 : 400, background: row === col ? "rgba(34,197,94,.12)" : count > 0 ? "rgba(239,68,68,.15)" : "transparent", color: row === col ? "var(--green)" : count > 0 ? "#ef4444" : "var(--muted)" }}>{count.toLocaleString()}</td>)}
-            </tr>)}</tbody>
-          </table></div>
-        </div>}
-
-        {Object.keys(perClass).length > 0 && <div style={{ background: "var(--panel2)", padding: 15, borderRadius: 8, border: "1px solid var(--line)" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>A1 per-class evaluation metrics</div>
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
-            <thead><tr style={{ borderBottom: "1px solid var(--line)", color: "var(--muted)", textAlign: "left" }}><th style={{ padding: 8 }}>CLASS</th><th style={{ padding: 8 }}>PRECISION</th><th style={{ padding: 8 }}>RECALL</th><th style={{ padding: 8 }}>F1</th><th style={{ padding: 8 }}>SUPPORT</th></tr></thead>
-            <tbody>{classes.map(value => {
-              const item = perClass[value] || {};
-              return <tr key={value} style={{ borderBottom: "1px solid var(--line)" }}>
-                <td style={{ padding: 8, fontWeight: 600 }}>{value}</td>
-                <td style={{ padding: 8, fontFamily: "monospace" }}>{typeof item.precision === "number" ? item.precision.toFixed(5) : "—"}</td>
-                <td style={{ padding: 8, fontFamily: "monospace" }}>{typeof item.recall === "number" ? item.recall.toFixed(5) : "—"}</td>
-                <td style={{ padding: 8, fontFamily: "monospace", color: "var(--green)" }}>{typeof item.f1 === "number" ? item.f1.toFixed(5) : "—"}</td>
-                <td style={{ padding: 8, fontFamily: "monospace" }}>{typeof item.support === "number" ? item.support.toLocaleString() : "—"}</td>
-              </tr>;
-            })}</tbody>
-          </table></div>
-        </div>}
-
-        <div style={{ marginTop: 12, fontSize: 10, color: "var(--muted)" }}>
-          A1 backend: {threat?.model_type || "not specified"} · A2 algorithm: {anomaly?.algorithm || "not specified"} · A2 threshold: {anomaly?.threshold ?? "—"} · A2 attack anomaly recall: {pct(anomaly?.attack_anomaly_recall)}
-        </div>
-        <div style={{ marginTop: 6, fontSize: 10, color: "var(--muted)" }}>Source: {report.evaluation_dataset?.path || "benchmark report"} · Training/evaluation provenance must be checked against the accompanying experiment documentation.</div>
-      </>}
-      <div className="panel-foot" style={{ marginTop: 14 }}>
-        <span><LockKeyhole size={13} /> No fallback metrics or confusion matrix are fabricated</span>
-        <span>MODEL CONFIDENCE IS NOT CALIBRATED</span>
-      </div>
-    </section>
-  );
-}
+export { ModelIntelligenceView } from "./ModelIntelligence";
 
 // ============================================================================
 // 9. AUDIT & LOCAL RUN HISTORY VIEW (SQLite Persistence)

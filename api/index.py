@@ -24,13 +24,17 @@ from cybersentinel.agents.adaptive_defense import AdaptiveDefenseAgent
 from cybersentinel.replay import ReplayEngine
 from cybersentinel.replay.submission import SubmissionValidator
 from cybersentinel.storage.history_db import list_runs, record_run
+import threading
 import pandas as pd
+from api.evaluation import router as evaluation_router
 
 app = FastAPI(
     title="CyberSentinel API",
     version="1.0.0",
     description="Offline 5-agent network-flow intrusion detection and adaptive defense replay system.",
 )
+app.include_router(evaluation_router)
+_state_lock = threading.Lock()
 
 THREAT_MODEL = BASE_DIR / "models" / "threat_detection" / "model.joblib"
 ANOMALY_MODEL = BASE_DIR / "models" / "anomaly_detection" / "model.joblib"
@@ -222,25 +226,26 @@ def analyze(payload: dict[str, Any]):
     # Run Tri-Agent pipeline
     analysis = pipeline.analyze(flow)
 
-    # Correlate with Agent 4
-    correlation = _correlation_agent.correlate(
-        record_id=flow.get("record_id", "live-flow"),
-        flow=flow,
-        threat_class=analysis.get("final_class"),
-        confidence=analysis.get("confidence"),
-    )
+    with _state_lock:
+        # Correlate with Agent 4
+        correlation = _correlation_agent.correlate(
+            record_id=flow.get("record_id", "live-flow"),
+            flow=flow,
+            threat_class=analysis.get("final_class"),
+            confidence=analysis.get("confidence"),
+        )
 
-    # Evaluate with Agent 5
-    src_ip, _, _ = TemporalCorrelationAgent.extract_endpoints(flow)
-    is_attack = analysis.get("action") == "BLOCK" or (correlation.correlated and correlation.attack_type != "BENIGN")
-    defense = _defense_agent.handle_post_analysis(
-        record_id=flow.get("record_id", "live-flow"),
-        source_ip=src_ip,
-        current_step=len(_correlation_agent.history),
-        attack_detected=is_attack,
-        attack_type=correlation.attack_type or analysis.get("final_class"),
-        confidence=analysis.get("confidence"),
-    )
+        # Evaluate with Agent 5
+        src_ip, _, _ = TemporalCorrelationAgent.extract_endpoints(flow)
+        is_attack = analysis.get("action") == "BLOCK" or (correlation.correlated and correlation.attack_type != "BENIGN")
+        defense = _defense_agent.handle_post_analysis(
+            record_id=flow.get("record_id", "live-flow"),
+            source_ip=src_ip,
+            current_step=len(_correlation_agent.history),
+            attack_detected=is_attack,
+            attack_type=correlation.attack_type or analysis.get("final_class"),
+            confidence=analysis.get("confidence"),
+        )
 
     analysis["temporal_correlation"] = {
         "correlated": correlation.correlated,

@@ -212,6 +212,7 @@ class ReplayEngine:
                 )
 
                 detected_type = correlation.attack_type or t_class or "ATTACK"
+                exp_rec_id = record_ids[min(step + self.defense_agent.default_duration, total_rows - 1)]
                 self.defense_agent.handle_post_analysis(
                     record_id=record_id,
                     source_ip=src_ip,
@@ -219,12 +220,14 @@ class ReplayEngine:
                     attack_detected=is_attack,
                     attack_type=detected_type,
                     confidence=t_conf,
+                    expires_record_id=exp_rec_id,
                 )
 
             replay_rows.append({
                 "record_id": record_id,
                 "action": action,
                 "applied_policy_id": applied_policy_id,
+                "active_policy_id": applied_policy_id,
             })
 
             if progress_callback and (step % 25000 == 0 or step == total_rows - 1):

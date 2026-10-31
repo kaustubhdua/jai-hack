@@ -41,12 +41,13 @@ class ThreatDetectionModel:
     Confidence is max predict_proba output; it is model-derived but not calibrated.
     """
     def __init__(self, backend="random_forest", random_state=42, n_estimators=400,
-                 max_depth=None, min_samples_leaf=2, n_jobs=-1):
+                 max_depth=None, min_samples_leaf=2, n_jobs=-1, allow_missing_classes=False):
         if backend not in {"random_forest", "xgboost"}:
             raise ValueError("backend must be random_forest or xgboost")
         self.backend, self.random_state = backend, int(random_state)
         self.n_estimators, self.max_depth = int(n_estimators), max_depth
         self.min_samples_leaf, self.n_jobs = int(min_samples_leaf), int(n_jobs)
+        self.allow_missing_classes = bool(allow_missing_classes)
         self.estimator = self.imputer = self.label_encoder = None
         self.feature_columns: list[str] = []
         self.metadata: dict[str, Any] = {}
@@ -63,7 +64,7 @@ class ThreatDetectionModel:
         if unknown:
             raise ValueError(f"Labels outside the five benchmark classes: {unknown}")
         missing = sorted(set(BENCHMARK_CLASSES) - set(y.unique()))
-        if missing:
+        if missing and not self.allow_missing_classes:
             raise ValueError(f"Training data must contain all five benchmark classes; missing: {missing}")
         # Feature selection is fitted on training data only; validation never changes this schema.
         self.feature_columns = [str(c) for c in x.columns if x[c].nunique(dropna=True) > 1]
@@ -88,8 +89,9 @@ class ThreatDetectionModel:
             except ImportError as exc:
                 raise ImportError("Install optional XGBoost with: pip install xgboost") from exc
             from sklearn.utils.class_weight import compute_sample_weight
+            n_classes = len(self.label_encoder.classes_)
             classifier = XGBClassifier(
-                objective="multi:softprob", num_class=len(BENCHMARK_CLASSES),
+                objective="multi:softprob", num_class=n_classes,
                 eval_metric="mlogloss", n_estimators=self.n_estimators,
                 max_depth=8 if self.max_depth is None else self.max_depth,
                 learning_rate=0.08, subsample=0.85, colsample_bytree=0.85,
@@ -107,12 +109,30 @@ class ThreatDetectionModel:
             "excluded_identifier_columns": sorted(DEFAULT_DROP_COLUMNS),
             "random_state": self.random_state,
             "confidence_definition": "maximum predict_proba class probability; not calibrated",
+            "allow_missing_classes": self.allow_missing_classes,
+            "trained_classes": list(self.label_encoder.classes_),
         }
         return self
 
     def _ready(self):
         if any(x is None for x in (self.estimator, self.imputer, self.label_encoder)):
             raise RuntimeError("Threat detection model is not trained or loaded.")
+
+    def predict_proba_canonical(self, features: pd.DataFrame) -> np.ndarray:
+        """Return aligned (N, 5) probability matrix matching canonical BENCHMARK_CLASSES order."""
+        self._ready()
+        x = numeric_features(features).reindex(columns=self.feature_columns)
+        raw_probs = self.estimator.predict_proba(self.imputer.transform(x))
+        trained_classes = [str(c) for c in self.label_encoder.classes_]
+
+        aligned = np.zeros((len(features), len(BENCHMARK_CLASSES)), dtype=np.float64)
+        for idx, cls_name in enumerate(BENCHMARK_CLASSES):
+            if cls_name in trained_classes:
+                col_idx = trained_classes.index(cls_name)
+                aligned[:, idx] = raw_probs[:, col_idx]
+            else:
+                aligned[:, idx] = 0.0
+        return aligned
 
     def predict_frame(self, features: pd.DataFrame) -> list[dict[str, Any]]:
         self._ready()
@@ -140,7 +160,7 @@ class ThreatDetectionModel:
             "metadata": self.metadata,
             "config": {"random_state": self.random_state, "n_estimators": self.n_estimators,
                        "max_depth": self.max_depth, "min_samples_leaf": self.min_samples_leaf,
-                       "n_jobs": self.n_jobs},
+                       "n_jobs": self.n_jobs, "allow_missing_classes": self.allow_missing_classes},
         }
         fd, temporary = tempfile.mkstemp(prefix=destination.name, suffix=".tmp", dir=str(destination.parent))
         os.close(fd)
@@ -157,7 +177,8 @@ class ThreatDetectionModel:
         payload = joblib.load(path)
         if payload.get("artifact_format_version") != ARTIFACT_FORMAT_VERSION:
             raise ValueError("Unsupported or incompatible model artifact version.")
-        instance = cls(backend=payload["backend"], **payload["config"])
+        config = dict(payload["config"])
+        instance = cls(backend=payload["backend"], **config)
         instance.estimator, instance.imputer = payload["estimator"], payload["imputer"]
         instance.label_encoder = payload["label_encoder"]
         instance.feature_columns = list(payload["feature_columns"])

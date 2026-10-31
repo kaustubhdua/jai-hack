@@ -65,6 +65,7 @@ class AdaptiveDefenseAgent:
         attack_type: str | None = None,
         confidence: float | None = None,
         duration: int | None = None,
+        expires_record_id: str | int | None = None,
     ) -> DefenseDecision:
         """Decide flow action and optionally generate a forward-looking policy for later records."""
         # Expire any outdated policies
@@ -80,15 +81,26 @@ class AdaptiveDefenseAgent:
                 pol_duration = duration or self.default_duration
                 expires_step = current_step + pol_duration
 
+                # Standardize expires_after_record_id semantics
+                if expires_record_id is not None:
+                    exp_id = expires_record_id
+                elif isinstance(record_id, int):
+                    exp_id = record_id + pol_duration
+                elif str(record_id).isdigit():
+                    exp_id = str(int(record_id) + pol_duration)
+                else:
+                    exp_id = f"{record_id}+{pol_duration}"
+
                 new_policy = DefensePolicy(
                     policy_id=pol_id,
                     activated_after_record_id=record_id,
                     scope_type="SOURCE_IP",
                     scope_value=source_ip,
-                    expires_after_record_id=expires_step,
+                    expires_after_record_id=exp_id,
                     policy_action="BLOCK",
                     reason=f"{attack_type} detected (confidence: {confidence or 1.0:.3f})",
                     created_at_step=current_step,
+                    expires_step=expires_step,
                 )
                 self.active_policies[source_ip] = new_policy
                 self.all_policies.append(new_policy)
@@ -106,8 +118,7 @@ class AdaptiveDefenseAgent:
         """Remove policies whose expiry step has passed."""
         expired = [
             src for src, pol in self.active_policies.items()
-            if current_step > pol.expires_after_record_id
+            if current_step > getattr(pol, "expires_step", pol.created_at_step + self.default_duration)
         ]
         for src in expired:
             del self.active_policies[src]
-

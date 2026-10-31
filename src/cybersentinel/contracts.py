@@ -70,6 +70,7 @@ class DefensePolicy:
     policy_action: Literal["BLOCK"] = "BLOCK"
     reason: str = ""
     created_at_step: int = 0
+    expires_step: int = 0
 
 @dataclass
 class DefenseDecision:
