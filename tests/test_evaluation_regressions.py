@@ -1,0 +1,57 @@
+"""Regression tests for evaluation report and runner contracts."""
+import ast
+import json
+import inspect
+from pathlib import Path
+
+import pandas as pd
+
+from cybersentinel.evaluation.classification import evaluate_classifier
+from cybersentinel.evaluation.loao import evaluate_leave_one_attack_out
+from cybersentinel.evaluation.report import save_evaluation_report
+from cybersentinel.evaluation.temporal import evaluate_temporal_correlation
+
+
+def test_classification_report_is_json_serializable_without_cycles():
+    report = evaluate_classifier(
+        ["BENIGN", "DOS", "DDOS", "PORT_SCAN", "BRUTE_FORCE"],
+        ["BENIGN", "DOS", "DDOS", "PORT_SCAN", "BRUTE_FORCE"],
+    )
+    encoded = json.dumps(report)
+    assert json.loads(encoded)["metrics"]["accuracy"] == 1.0
+
+
+def test_save_evaluation_report_writes_valid_json(tmp_path):
+    report = evaluate_classifier(["BENIGN", "DOS"], ["BENIGN", "DOS"])
+    path = save_evaluation_report("classification", report, tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["data"]["metrics"]["accuracy"] == 1.0
+
+
+def test_loao_runner_call_matches_public_function_signature():
+    script = Path(__file__).resolve().parents[1] / "scripts" / "evaluate_full_system.py"
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "evaluate_leave_one_attack_out"
+    ]
+    assert len(calls) == 1
+    accepted = set(inspect.signature(evaluate_leave_one_attack_out).parameters)
+    passed = {kw.arg for kw in calls[0].keywords if kw.arg}
+    assert passed <= accepted
+    assert "omitted_classes" not in passed
+
+
+def test_temporal_evaluation_represents_unobserved_delay_as_none():
+    frame = pd.DataFrame({
+        "record_id": ["r1", "r2"],
+        "source_ip": ["", ""],
+        "Destination Port": [80, 443],
+        "label": ["BENIGN", "DOS"],
+    })
+    report = evaluate_temporal_correlation(frame, test_shuffled_robustness=False)
+    summary = report["evaluation_summary"]
+    assert summary["campaigns_by_type"]["DDOS"] == 0
+    assert summary["mean_detection_delay_flows"] is None
