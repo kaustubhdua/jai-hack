@@ -1,5 +1,7 @@
 # CyberSentinel API Reference
 
+> **Example-only values:** JSON responses and numeric values below are illustrative placeholders. They do not prove that models are installed, that a run occurred, or that the displayed confidence, counts, or latency were measured. Check live diagnostics and current run reports for actual status.
+
 ## Base URL
 `/api` (Vercel Serverless Functions)
 
