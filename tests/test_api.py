@@ -9,7 +9,12 @@ class ReadyPipeline:
             def predict(self, flow):
                 from cybersentinel.contracts import ThreatDetectionResult
                 return ThreatDetectionResult(predicted_class="BENIGN", confidence=0.99)
+        class ModelStub:
+            feature_columns = ["Flow Duration", "Destination Port"]
+            metadata = {"confidence_calibrated": False}
+
         class AnomalyStub:
+            feature_columns = ["Flow Duration", "Destination Port"]
             def score(self, flow):
                 from cybersentinel.contracts import AnomalyDetectionResult
                 return AnomalyDetectionResult(anomaly_score=0.01, is_anomaly=False)
@@ -19,6 +24,7 @@ class ReadyPipeline:
                 return FusionResult(final_class="BENIGN", evidence_status="AGREE", action="ALLOW", rationale=["Stub"])
 
         self.threat_agent = ThreatStub()
+        self.threat_agent.model = ModelStub()
         self.anomaly_agent = AnomalyStub()
         self.fusion_agent = FusionStub()
 
@@ -42,9 +48,9 @@ def test_health_does_not_claim_models_ready_without_artifacts(monkeypatch, tmp_p
     assert response.status_code == 200
     payload = response.json()
     assert payload["model_ready"] is False
-    assert payload["agents"]["agent_3_evidence_fusion"] is True
-    assert payload["agents"]["agent_4_temporal_correlation"] is True
-    assert payload["agents"]["agent_5_adaptive_defense"] is True
+    assert payload["agents"]["agent_3_evidence_fusion"] is False
+    assert payload["agents"]["agent_4_temporal_correlation"] is False
+    assert payload["agents"]["agent_5_adaptive_defense"] is False
 
 
 def test_single_flow_endpoint_fails_closed_without_models(monkeypatch, tmp_path):
@@ -61,8 +67,8 @@ def test_single_flow_endpoint_returns_pipeline_result(monkeypatch):
     response = TestClient(index.app).post("/api/analyze", json={"flow": {"Flow Duration": 100, "Destination Port": 80}})
     assert response.status_code == 200
     assert response.json()["action"] == "ALLOW"
-    assert "temporal_correlation" in response.json()
-    assert "adaptive_defense" in response.json()
+    assert response.json()["execution_mode"] == "single_record_model_inference"
+    assert response.json()["stateful_agents"].startswith("not_run")
 
 
 def test_batch_endpoint_returns_aggregated_actions(monkeypatch):
@@ -79,8 +85,12 @@ def test_batch_endpoint_returns_aggregated_actions(monkeypatch):
 def test_replay_simulate_endpoint(monkeypatch):
     monkeypatch.setattr(index, "_pipeline", ReadyPipeline())
     flows = [
-        {"record_id": 1, "source_ip": "10.0.0.1", "Destination Port": 443},
-        {"record_id": 2, "source_ip": "10.0.0.1", "Destination Port": 443},
+        {"record_id": 1, "seq": 1, "day": "2017-07-04", "time_offset": "00:00.0",
+         "source_ip": "10.0.0.1", "destination_ip": "10.0.0.2", "source_port": 50000,
+         "destination_port": 443, "protocol": 6, "Destination Port": 443, "Flow Duration": 1000},
+        {"record_id": 2, "seq": 2, "day": "2017-07-04", "time_offset": "00:01.0",
+         "source_ip": "10.0.0.1", "destination_ip": "10.0.0.2", "source_port": 50001,
+         "destination_port": 443, "protocol": 6, "Destination Port": 443, "Flow Duration": 1200},
     ]
     response = TestClient(index.app).post("/api/replay/simulate", json={"flows": flows})
     assert response.status_code == 200
@@ -142,3 +152,54 @@ def test_correlation_groups_empty_when_no_replay_state(monkeypatch):
     assert payload["groups"] == []
     assert payload["total"] == 0
     assert payload["synthetic"] is False
+
+
+def test_submission_validation_uses_original_input_not_output_ids(monkeypatch, tmp_path):
+    import pandas as pd
+
+    data_dir = tmp_path / "data" / "processed"
+    data_dir.mkdir(parents=True)
+    pd.DataFrame([
+        {"record_id": 1, "seq": 1, "source_ip": "192.0.2.1", "destination_ip": "198.51.100.1"},
+        {"record_id": 2, "seq": 2, "source_ip": "192.0.2.2", "destination_ip": "198.51.100.2"},
+    ]).to_csv(data_dir / "hidden_replay_input.csv", index=False)
+    output_dir = tmp_path / "outputs" / "submission"
+    output_dir.mkdir(parents=True)
+    (output_dir / "classification.csv").write_text(
+        "record_id,predicted_class,anomaly_score,evidence_status\n1,BENIGN,0.1,AGREE\n",
+        encoding="utf-8",
+    )
+    (output_dir / "policies.csv").write_text(
+        "policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id\n",
+        encoding="utf-8",
+    )
+    (output_dir / "replay.csv").write_text(
+        "record_id,action,active_policy_id\n1,ALLOW,NONE\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(index, "BASE_DIR", tmp_path)
+
+    response = TestClient(index.app).get("/api/replay/validate")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["all_valid"] is False
+    assert payload["classification"]["row_count"] == 1
+    assert any("original seq order" in error for error in payload["classification"]["errors"])
+    assert payload["replay"]["row_count"] == 1
+
+
+def test_submission_validation_refuses_to_claim_valid_without_source_dataset(monkeypatch, tmp_path):
+    output_dir = tmp_path / "outputs" / "submission"
+    output_dir.mkdir(parents=True)
+    (output_dir / "classification.csv").write_text(
+        "record_id,predicted_class,anomaly_score,evidence_status\n1,BENIGN,0.1,AGREE\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(index, "BASE_DIR", tmp_path)
+
+    response = TestClient(index.app).get("/api/replay/validate")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "INPUT_DATASET_NOT_AVAILABLE"
+    assert response.json()["valid"] is False

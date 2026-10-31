@@ -2,14 +2,14 @@ import { useEffect, useRef, useState, useId } from "react";
 import * as THREE from "three";
 import { Shield, ZoomIn, ZoomOut, RotateCcw, X } from "lucide-react";
 
-export type ThreatLevel = "LOW" | "ELEVATED" | "CRITICAL";
+export type VisualTone = "COOL" | "AMBER" | "ROSE";
 
 interface NodeData {
   id: string;
   name: string;
   role: string;
   category: "agent" | "core" | "ingress" | "target";
-  status: "ACTIVE" | "MONITORING" | "ENFORCING" | "QUARANTINED";
+  status: string;
   latency: string;
   flows: string;
   color: number;
@@ -23,47 +23,47 @@ const NODES_METADATA: Record<string, NodeData> = {
     name: "CyberSentinel Nexus Core",
     role: "Stateful Replay & Ingress Decision Bus",
     category: "core",
-    status: "ACTIVE",
-    latency: "Measured per replay",
-    flows: "Chronological flow stream",
+    status: "SCHEMATIC",
+    latency: "Not measured in schematic",
+    flows: "No live telemetry",
     color: 0x38bdf8,
     description: "Checks policies activated by earlier records before allowing a flow into the decision pipeline. Classification outputs are still retained for every record.",
-    contract: "Input: Raw Flow 5-Tuple -> Output: Filter Decision (ALLOW / DROP)",
+    contract: "Input: Organizer flow record -> Output: Causal replay gate (ALLOW / BLOCK)",
   },
   agent1: {
     id: "agent1",
     name: "Agent 1: Threat Detection",
     role: "Supervised Multiclass Classifier (Random Forest)",
     category: "agent",
-    status: "ACTIVE",
-    latency: "Model benchmark metadata",
-    flows: "Awaiting measured replay",
+    status: "MODEL-DEPENDENT",
+    latency: "Not measured in schematic",
+    flows: "No live telemetry",
     color: 0x06b6d4, // Cyan
-    description: "Evaluates 71 preprocessed network flow statistics to classify known attack families (DoS, DDoS, PortScan, BruteForce) with model confidence (not probability-calibrated).",
-    contract: "Input: 71 numeric flow statistics -> Output: Class + Confidence",
+    description: "Evaluates 78 numeric network flow features to classify known attack families (DoS, DDoS, PortScan, BruteForce) with model confidence (not probability-calibrated).",
+    contract: "Input: 78 numeric flow features -> Output: Class + Confidence",
   },
   agent2: {
     id: "agent2",
     name: "Agent 2: Anomaly Detection",
     role: "Unsupervised Baseline Isolation Forest",
     category: "agent",
-    status: "ACTIVE",
-    latency: "Model benchmark metadata",
+    status: "MODEL-DEPENDENT",
+    latency: "Measured per inference",
     flows: "Awaiting measured replay",
     color: 0xa855f7, // Purple
-    description: "Trained exclusively on benign baseline traffic with no label leakage. Computes continuous anomaly scores to detect novel and zero-day traffic aberrations.",
-    contract: "Input: 71 numeric flow statistics -> Output: Anomaly Score [-1, 1] + Flag",
+    description: "Trained exclusively on benign baseline traffic with no label leakage. Computes a bounded anomaly index against the benign training baseline; the index is not a probability.",
+    contract: "Input: 78 numeric flow features -> Output: Bounded anomaly index [0, 1] + Flag",
   },
   agent3: {
     id: "agent3",
     name: "Agent 3: Evidence Fusion",
     role: "Tactical Consensus Matrix Arbiter",
     category: "agent",
-    status: "ACTIVE",
-    latency: "Measured per replay",
+    status: "CODE PRESENT",
+    latency: "Not independently measured",
     flows: "Deterministic evidence fusion",
     color: 0x10b981, // Emerald
-    description: "Fuses supervised and unsupervised evidence. Corroborated attacks trigger autonomous BLOCK recommendations; disagreements fail closed to explainable REVIEW.",
+    description: "Combines A1/A2 outputs into AGREE, CONFLICT, or UNCERTAIN evidence and a deterministic recommendation. The replay gate, not this schematic, determines the final ALLOW/BLOCK action.",
     contract: "Input: ThreatResult + AnomalyResult -> Output: Action + Rationale",
   },
   agent4: {
@@ -71,8 +71,8 @@ const NODES_METADATA: Record<string, NodeData> = {
     name: "Agent 4: Temporal Correlation",
     role: "Sliding-Window Campaign Correlator",
     category: "agent",
-    status: "ACTIVE",
-    latency: "Measured per replay",
+    status: "CODE PRESENT",
+    latency: "Not independently measured",
     flows: "Observed-window correlation",
     color: 0xf59e0b, // Amber
     description: "Maintains causal sliding windows to group multi-flow attack patterns: Horizontal Port Scans (>=5 ports), DDoS convergence, and brute-force auth sweeps.",
@@ -83,40 +83,40 @@ const NODES_METADATA: Record<string, NodeData> = {
     name: "Agent 5: Adaptive Defense",
     role: "Simulated Quarantine Policy Synthesizer",
     category: "agent",
-    status: "ENFORCING",
-    latency: "Measured per replay",
+    status: "SIMULATED ONLY",
+    latency: "Not independently measured",
     flows: "Temporary simulated policies",
     color: 0xf43f5e, // Rose / Red
-    description: "Synthesizes temporary simulated firewall rules (POL-XXXXX) for malicious source endpoints with exact expiration TTLs. Operates strictly in memory.",
+    description: "Creates temporary simulated policy records for observed source endpoints. No operating-system or network firewall is modified.",
     contract: "Input: Consensus evidence -> Output: Policy ID + Expiry boundary",
   },
   ingress: {
     id: "ingress",
     name: "Ingress Edge Cluster",
-    role: "Network Edge Sensor & Capture Interface",
+    role: "Offline Organizer Replay Input",
     category: "ingress",
-    status: "MONITORING",
-    latency: "0.001 ms",
-    flows: "Derived endpoint identities (if available)",
+    status: "OFFLINE INPUT",
+    latency: "Not measured",
+    flows: "Organizer-provided observed endpoints",
     color: 0x60a5fa,
-    description: "Represents the offline flow-ingress boundary. When native IP fields are absent, derived TCP-stack identities are explicitly approximate and collision-prone.",
-    contract: "Ingress Wire -> NetFlow 5-Tuple",
+    description: "Represents the offline organizer-input boundary. Only literal observed source/destination endpoint fields are used; missing endpoints remain unknown.",
+    contract: "Organizer row -> 78 flow features + observed endpoint metadata",
   },
   target: {
     id: "target",
-    name: "Protected Corporate Datacenter",
-    role: "Internal Enterprise Assets & Services",
+    name: "Illustrative downstream service",
+    role: "Diagram-only target node",
     category: "target",
-    status: "MONITORING",
-    latency: "0.000 ms",
-    flows: "Evaluated after replay",
+    status: "ILLUSTRATIVE",
+    latency: "Not measured",
+    flows: "Schematic target; no live network connection",
     color: 0x34d399,
-    description: "Target enterprise infrastructure (Web services, SSH bastions, internal databases). Kept safe from DDoS and brute force via active pre-filter dropping.",
-    contract: "Verified Clean Traffic Egress",
+    description: "Illustrative protected service endpoint for the architecture view. No traffic is sent to or received from a real datacenter.",
+    contract: "Illustrative target only; no live network egress",
   },
 };
 
-export function NetworkTopology3D({ threatLevel = "LOW" }: { threatLevel?: ThreatLevel }) {
+export function NetworkTopology3D({ visualTone = "COOL" }: { visualTone?: VisualTone }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const [hasWebGL, setHasWebGL] = useState(true);
   const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
@@ -181,7 +181,7 @@ export function NetworkTopology3D({ threatLevel = "LOW" }: { threatLevel?: Threa
     scene.add(mainLight);
 
     const threatColorHex =
-      threatLevel === "CRITICAL" ? 0xef4444 : threatLevel === "ELEVATED" ? 0xf59e0b : 0x0284c7;
+      visualTone === "ROSE" ? 0xef4444 : visualTone === "AMBER" ? 0xf59e0b : 0x0284c7;
     const threatLight = new THREE.PointLight(threatColorHex, 45, 20);
     threatLight.position.set(-5, -3, 3);
     scene.add(threatLight);
@@ -310,49 +310,7 @@ export function NetworkTopology3D({ threatLevel = "LOW" }: { threatLevel?: Threa
     });
     rootGroup.add(new THREE.Mesh(targetTubeGeo, targetTubeMat));
 
-    // 5. Flow Packet Pulse Sprites along Curves
-    const packetSprites: { curve: THREE.CatmullRomCurve3; mesh: THREE.Mesh; speed: number; progress: number }[] = [];
-    const packetGeo = new THREE.SphereGeometry(0.065, 8, 8);
-    const packetMat = new THREE.MeshBasicMaterial({
-      color: threatLevel === "CRITICAL" ? 0xef4444 : 0x38bdf8,
-    });
-
-    const curvesToPulse = [ingressCurve, targetCurve];
-    curvesToPulse.forEach((c) => {
-      for (let p = 0; p < 4; p++) {
-        const pMesh = new THREE.Mesh(packetGeo, packetMat);
-        rootGroup.add(pMesh);
-        packetSprites.push({
-          curve: c,
-          mesh: pMesh,
-          speed: 0.12 + Math.random() * 0.08,
-          progress: p * 0.25,
-        });
-      }
-    });
-
-    // 6. Ambient Orbiting Particle Dust
-    const particleCount = 280;
-    const particlePositions = new Float32Array(particleCount * 3);
-    for (let i = 0; i < particleCount; i++) {
-      const r = 2.8 + Math.random() * 3.5;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = (Math.random() - 0.5) * Math.PI;
-      particlePositions[i * 3] = r * Math.cos(theta) * Math.cos(phi);
-      particlePositions[i * 3 + 1] = r * Math.sin(phi);
-      particlePositions[i * 3 + 2] = r * Math.sin(theta) * Math.cos(phi);
-    }
-    const particleGeo = new THREE.BufferGeometry();
-    particleGeo.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
-    const particleMat = new THREE.PointsMaterial({
-      size: 0.038,
-      color: threatLevel === "CRITICAL" ? 0xf87171 : 0x38bdf8,
-      transparent: true,
-      opacity: 0.65,
-      blending: THREE.AdditiveBlending,
-    });
-    const particles = new THREE.Points(particleGeo, particleMat);
-    rootGroup.add(particles);
+    // No synthetic flow packets, random particles, or live-traffic animation are rendered.
 
     // Mouse Interaction: Pointer Tilt and Raycasting
     const pointer = new THREE.Vector2();
@@ -458,18 +416,9 @@ export function NetworkTopology3D({ threatLevel = "LOW" }: { threatLevel?: Threa
         rootGroup.rotation.y += delta * 0.06;
       }
 
-      // Animate packet pulses along paths
-      packetSprites.forEach((p) => {
-        p.progress = (p.progress + delta * p.speed) % 1.0;
-        const pt = p.curve.getPoint(p.progress);
-        p.mesh.position.copy(pt);
-      });
-
       // Subtle pulse on Core
       const coreScale = 1.0 + Math.sin(elapsed * 2.5) * 0.04;
       coreMesh.scale.set(coreScale, coreScale, coreScale);
-
-      particles.rotation.y += delta * 0.03;
 
       renderer.render(scene, camera);
     };
@@ -489,7 +438,7 @@ export function NetworkTopology3D({ threatLevel = "LOW" }: { threatLevel?: Threa
       }
       renderer.dispose();
     };
-  }, [threatLevel]);
+  }, [visualTone]);
 
   // 2D Fallback for environments without WebGL
   if (!hasWebGL) {

@@ -19,6 +19,8 @@ If the data already uses canonical classes (`BENIGN`, `BRUTE_FORCE`, `DOS`, `DDO
 
 ## Training Commands
 
+For the supported combined A1/A2 workflow, use `python scripts/train_models.py --train data/raw/training/flows.parquet`. It creates a deterministic stratified calibration holdout from the authorized training partition by default, fits A1 on the remaining rows, and records calibration provenance. The lower-level commands below are for isolated agent development and reproduction.
+
 ### 1. Training on Prepared Parquet (Canonical Challenge Split)
 ```bash
 python -m cybersentinel.agents.threat_detection.train \

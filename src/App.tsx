@@ -1,12 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Papa from "papaparse";
 import {
-  Activity, AlertTriangle, ArrowRight, ArrowUpRight, Bell, Check,
+  Activity, ArrowRight, ArrowUpRight, Check,
   ChevronDown, CircleHelp, CloudUpload, Cpu, Database, Download, FileSpreadsheet, Fingerprint,
-  Gauge, Layers, LockKeyhole, LogOut, Menu, X, Network, Play, RefreshCw, Shield,
+  Gauge, Layers, LockKeyhole, Menu, X, Network, Play, RefreshCw, Shield,
   ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles
 } from "lucide-react";
-import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { ParticleBackdrop } from "./components/ParticleBackdrop";
 const Agent2Console = lazy(() => import("./FlowInspector").then(module => ({ default: module.Agent2Console })));
 const FlowInspector = lazy(() => import("./FlowInspector").then(module => ({ default: module.FlowInspector })));
@@ -62,28 +61,17 @@ const BENCHMARK = ["BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN"];
 const formatNumber = (n: number) => new Intl.NumberFormat("en-IN").format(n);
 
 export default function App() {
-  const [session, setSession] = useState<any>(null);
-  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authError, setAuthError] = useState("");
+  const session = { user: { display_name: "Local analyst", email: null as string | null } };
   const [health, setHealth] = useState<Health | null>(null);
   const [overview, setOverview] = useState<any>(null);
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [historyMessage, setHistoryMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [activeNav, setActiveNav] = useState("Overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => data.subscription.unsubscribe();
-  }, []);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -91,8 +79,10 @@ export default function App() {
       if (!response.ok) throw new Error("Local history API unavailable");
       const data = await response.json();
       setHistory(Array.isArray(data.runs) ? data.runs : []);
+      setHistoryMessage(typeof data.message === "string" ? data.message : "");
     } catch {
       setHistory([]);
+      setHistoryMessage("Local replay history is unavailable until the Python API is running.");
     }
   }, []);
 
@@ -118,29 +108,6 @@ export default function App() {
     }
   }, []);
   useEffect(() => { void checkHealth(); void loadOverview(); }, [checkHealth, loadOverview]);
-
-  async function authenticate(event: FormEvent) {
-    event.preventDefault();
-    if (!supabase) return;
-    setAuthBusy(true); setAuthError("");
-    const result = authMode === "signin"
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password });
-    setAuthBusy(false);
-    if (result.error) setAuthError(result.error.message);
-    else if (authMode === "signup" && !result.data.session) setAuthError("Check your email to confirm your account, then sign in.");
-  }
-
-  async function signOut() {
-    await supabase?.auth.signOut();
-    setSession(null);
-    setHistory([]);
-  }
-
-  function enterGuestMode() {
-    setSession({ user: { email: "analyst@cybersentinel.internal" } });
-    setNotice("Entered CyberSentinel console in Offline Guest Mode. Supabase persistence disabled.");
-  }
 
   function inspectFile(file?: File) {
     if (!file) return;
@@ -173,52 +140,12 @@ export default function App() {
   const totalLabels = dataset ? Object.values(dataset.labels).reduce((a, b) => a + b, 0) : 0;
   const labelCoverage = totalLabels ? Math.round(knownLabels.reduce((n, l) => n + dataset!.labels[l], 0) / totalLabels * 100) : 0;
 
-  if (!session) return <div className="auth-shell">
-    <ParticleBackdrop />
-    <div className="auth-art">
-      <div className="brand"><div className="brand-mark"><Shield size={21} /></div><span>CYBERSENTINEL</span></div>
-      <div className="auth-copy">
-        <div className="eyebrow"><span className="pulse-dot" /> JAI 2026 · TRACK 01</div>
-        <h1>See the threat.<br /><em>Understand the why.</em></h1>
-        <p>Multi-agent network intrusion detection with transparent evidence and adaptive, simulated defense.</p>
-        <div className="auth-stats">
-          <div><strong>05</strong><span>COOPERATING AGENTS</span></div>
-          <div><strong>05</strong><span>BENCHMARK CLASSES</span></div>
-          <div><strong>99.99%</strong><span>HOLDOUT ACCURACY</span></div>
-        </div>
-      </div>
-      <div className="auth-foot"><span>OFFLINE FLOW ANALYSIS</span><span>RELEASE 1.0.0</span></div>
-    </div>
-    <div className="auth-panel">
-      <form className="auth-card" onSubmit={authenticate}>
-        <div className="auth-icon"><Fingerprint size={22} /></div>
-        <div className="eyebrow">SECURE WORKSPACE</div>
-        <h2>{authMode === "signin" ? "Welcome back" : "Create your workspace"}</h2>
-        <p className="muted">Sign in with Supabase or continue in offline guest mode.</p>
-        <label>Email address<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@team.com" required autoComplete="email" /></label>
-        <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" required minLength={8} autoComplete={authMode === "signin" ? "current-password" : "new-password"} /></label>
-        {authError && <div className="auth-error"><AlertTriangle size={15} />{authError}</div>}
-        {!isSupabaseConfigured && <div className="auth-error">Supabase cloud URL is not configured. Use Guest Mode below.</div>}
-        <button className="primary-btn full" disabled={authBusy || !isSupabaseConfigured}>
-          {authBusy ? "Please wait…" : authMode === "signin" ? "Sign in" : "Create account"}<ArrowRight size={16} />
-        </button>
-        <button type="button" className="secondary-btn full" style={{ marginTop: 8 }} onClick={enterGuestMode}>
-          Continue in Offline Guest Mode
-        </button>
-        <div className="auth-switch">
-          {authMode === "signin" ? "New to CyberSentinel?" : "Already have an account?"} <button type="button" onClick={() => { setAuthMode(authMode === "signin" ? "signup" : "signin"); setAuthError(""); }}>{authMode === "signin" ? "Create account" : "Sign in"}</button>
-        </div>
-        <div className="secure-note"><LockKeyhole size={13} /> Offline replay & evaluation only · Zero live firewall changes</div>
-      </form>
-    </div>
-  </div>;
-
   return <div className="app-shell">
     <ParticleBackdrop />
     {mobileNavOpen && <button type="button" className="mobile-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
     <aside className={"sidebar" + (mobileNavOpen ? " mobile-open" : "")}>
       <div className="brand"><div className="brand-mark"><Shield size={21} /></div><span>CYBERSENTINEL</span></div>
-      <div className="workspace"><div className="workspace-avatar">J</div><div><b>JAI HACK 2026</b><small>Security workspace</small></div><ChevronDown size={14} /></div>
+      <div className="workspace"><div className="workspace-avatar">L</div><div><b>LOCAL ANALYST</b><small>Offline workspace</small></div><ChevronDown size={14} /></div>
       <div className="nav-label">COMMAND WORKSPACE</div>
       {[
         ["Overview", Gauge],
@@ -245,7 +172,7 @@ export default function App() {
         </button>
       ))}
       <div className="nav-label nav-label-lower">DOCUMENTATION & REPO</div>
-      <button className="nav-item" onClick={()=>setNotice("Complete offline setup, reproduction benchmarks, and model artifacts are verified under release/day2-final/.")}><CircleHelp size={16}/>Release Guides<ArrowUpRight size={13} className="nav-external"/></button>
+      <a className="nav-item" href="https://github.com/kaustubhdua/jai-hack/tree/feat/cybersentinel-release-hardening/docs" target="_blank" rel="noreferrer"><CircleHelp size={16}/>Product documentation<ArrowUpRight size={13} className="nav-external"/></a>
       <div className="sidebar-bottom">
         <div className="system-card">
           <div className="system-card-head"><span className="pulse-dot" /> SYSTEM STATUS</div>
@@ -254,9 +181,8 @@ export default function App() {
           <div className="system-row"><span>ML models</span><b className={health?.model_ready ? "status-ok" : "status-warn"}>{health?.model_ready ? "Active" : "Pending"}</b></div>
         </div>
         <div className="profile-row">
-          <div className="profile-avatar">{(session.user.email?.[0] ?? "U").toUpperCase()}</div>
-          <div className="profile-meta"><b>{session.user.email}</b><small>Analyst session</small></div>
-          <button title="Sign out" onClick={signOut} className="icon-btn"><LogOut size={16} /></button>
+          <div className="profile-avatar">L</div>
+          <div className="profile-meta"><b>{session.user.display_name}</b><small>Local analyst session</small></div>
         </div>
       </div>
     </aside>
@@ -268,20 +194,19 @@ export default function App() {
         <div className="top-actions">
           <div className="env-pill"><span className="pulse-dot" /> OFFLINE REPLAY MODE</div>
           <button className="icon-btn" title="Refresh API and replay status" onClick={() => { void checkHealth(); void loadOverview(); }}><RefreshCw size={16} /></button>
-          <button className="icon-btn" title="Notifications" onClick={() => setNotice("No new alerts. All agents operational.")}><Bell size={16} /></button>
-          <div className="top-avatar">{(session.user.email?.[0] ?? "U").toUpperCase()}</div>
+          <div className="top-avatar">L</div>
         </div>
       </header>
       <div className="page-wrap">
         <section className="page-heading">
           <div>
-            <div className="eyebrow">THREAT INTELLIGENCE CONSOLE <span className="heading-line" /></div>
+            <div className="eyebrow">NETWORK FLOW ANALYSIS <span className="heading-line" /></div>
             <h1>{activeNav === "Overview" ? "Security overview" : activeNav}</h1>
-            <p>Monitor network-flow datasets, inspect evidence, and orchestrate agent-based detection.</p>
+            <p>Inspect captured flow records, review model evidence, and run causal offline replay. No live traffic is captured.</p>
           </div>
           <div className="heading-actions">
-            <span className="date-chip">JAI 2026 <span>·</span> BENCHMARK R1</span>
-            <button className="primary-btn" onClick={() => inputRef.current?.click()}><CloudUpload size={16} /> Inspect dataset</button>
+            <span className="date-chip">LOCAL WORKSPACE <span>·</span> OFFLINE</span>
+            <button className="primary-btn" onClick={() => inputRef.current?.click()}><CloudUpload size={16} /> Inspect CSV</button>
           </div>
         </section>
         {notice && <div className="notice" role="status" aria-live="polite"><Check size={15} />{notice}<button onClick={() => setNotice("")}><X size={15} /></button></div>}
@@ -292,17 +217,17 @@ export default function App() {
             <section className="metrics-grid">
               <Metric icon={Database} label="DATASET FLOWS" value={dataset ? formatNumber(dataset.rows) : (overview ? formatNumber(overview.metrics.total_records) : "—")} detail={dataset ? "Inspected in browser" : (overview ? "Verified replay artifact" : "Awaiting local replay artifacts") } tone="blue"/>
               <Metric icon={ShieldAlert} label="POLICIES CREATED" value={overview ? formatNumber(overview.metrics.policies_created) : "—"} detail={overview ? "Generated by completed replay" : "No generated policy file detected"} tone="amber"/>
-              <Metric icon={ShieldCheck} label="ATTACK CONTAINMENT" value={overview ? overview.metrics.attack_containment_rate.toFixed(2) + "%" : "—"} detail={overview ? formatNumber(overview.metrics.attacks_contained) + " attack flows blocked" : "Computed from local labels and replay"} tone="green"/>
-              <Metric icon={Cpu} label="BENIGN PRESERVED" value={overview ? overview.metrics.benign_preservation_rate.toFixed(2) + "%" : "—"} detail={overview ? formatNumber(overview.metrics.benign_preserved) + " benign flows preserved" : "Computed from local labels and replay"} tone="violet"/>
+              <Metric icon={ShieldCheck} label="ATTACK CONTAINMENT" value={typeof overview?.metrics?.attack_containment_rate === "number" ? overview.metrics.attack_containment_rate.toFixed(2) + "%" : "Not measured"} detail={typeof overview?.metrics?.attack_containment_rate === "number" ? formatNumber(overview.metrics.attacks_contained) + " labelled attack flows blocked" : "Hidden replay has no ground-truth labels"} tone="green"/>
+              <Metric icon={Cpu} label="BENIGN PRESERVED" value={typeof overview?.metrics?.benign_preservation_rate === "number" ? overview.metrics.benign_preservation_rate.toFixed(2) + "%" : "Not measured"} detail={typeof overview?.metrics?.benign_preservation_rate === "number" ? formatNumber(overview.metrics.benign_preserved) + " labelled benign flows preserved" : "Hidden replay has no ground-truth labels"} tone="violet"/>
             </section>
 
             <section className="content-grid">
               <div className="panel dataset-panel">
                 <div className="panel-head">
                   <div>
-                    <div className="panel-kicker">DATA INGESTION</div>
-                    <h3>Dataset inspection</h3>
-                    <p>Validate a labelled flow CSV before model training or replay.</p>
+                    <div className="panel-kicker">LOCAL CSV INSPECTION</div>
+                    <h3>Inspect a flow dataset</h3>
+                    <p>Review CSV columns and label distribution in this browser. This control does not train a model or run inference.</p>
                   </div>
                   <span className="panel-icon"><FileSpreadsheet size={18}/></span>
                 </div>
@@ -310,9 +235,9 @@ export default function App() {
                 {!dataset ? (
                   <button className="dropzone" onClick={()=>inputRef.current?.click()} disabled={busy}>
                     <div className="upload-icon"><CloudUpload size={23}/></div>
-                    <b>{busy?"Inspecting CSV…":"Drop your dataset here"}</b>
+                    <b>{busy?"Inspecting CSV…":"Choose a CSV to inspect"}</b>
                     <span>or <u>browse files</u> · CSV format</span>
-                    <small>Processed locally in your browser · File is not uploaded</small>
+                    <small>Browser-only schema inspection · File is not uploaded to the backend</small>
                   </button>
                 ) : (
                   <div className="dataset-loaded">
@@ -323,7 +248,7 @@ export default function App() {
                     </div>
                     <div className="dataset-facts">
                       <div><small>ROWS</small><b>{formatNumber(dataset.rows)}</b></div>
-                      <div><small>FEATURES</small><b>{dataset.columns.length}</b></div>
+                      <div><small>COLUMNS</small><b>{dataset.columns.length}</b></div>
                       <div><small>LABEL FIELD</small><b>{dataset.labelColumn??"Not found"}</b></div>
                     </div>
                     <div className="label-head"><b>Detected label distribution</b><span>{knownLabels.length}/5 benchmark classes · {labelCoverage}% mapped</span></div>
@@ -340,7 +265,7 @@ export default function App() {
                 )}
                 <div className="panel-foot">
                   <span><LockKeyhole size={13}/> Data stays in this browser</span>
-                  <span>MAX FILE SIZE: BROWSER-DEPENDENT</span>
+                  <span>LOCAL BROWSER INSPECTION</span>
                 </div>
               </div>
 
@@ -351,22 +276,22 @@ export default function App() {
                     <h3>Detection pipeline</h3>
                     <p>Independent signals, explainable decisions.</p>
                   </div>
-                  <span className="live-tag"><span className="pulse-dot"/> LIVE STATUS</span>
+                  <span className="live-tag">COMPONENT READINESS</span>
                 </div>
                 <div className="agent-list">
                   <Agent number="01" title="Threat detection" desc="Supervised five-class classification" status={health?.agents?.agent_1_threat_detection ? "Active" : "Awaiting model"} icon={ShieldAlert}/>
                   <div className="agent-connector"/>
                   <Agent number="02" title="Anomaly detection" desc="Independent unsupervised outlier scoring" status={health?.agents?.agent_2_anomaly_detection ? "Active" : "Awaiting model"} icon={Activity}/>
                   <div className="agent-connector"/>
-                  <Agent number="03" title="Evidence fusion" desc="Combines A1 and A2 evidence and disagreement" status={health?.agents?.agent_3_evidence_fusion ? "Active" : "Unavailable"} icon={Fingerprint}/>
+                  <Agent number="03" title="Evidence fusion" desc="Combines A1 and A2 evidence and disagreement" status={health?.agents?.agent_3_evidence_fusion ? "Ready" : "Waiting for model pipeline"} icon={Fingerprint}/>
                   <div className="agent-connector"/>
-                  <Agent number="04" title="Temporal correlation" desc="Groups suspicious flows in observed time windows" status={health?.agents?.agent_4_temporal_correlation ? "Active" : "Unavailable"} icon={Network}/>
+                  <Agent number="04" title="Temporal correlation" desc="Groups suspicious flows in observed time windows" status={health?.agents?.agent_4_temporal_correlation ? "Ready" : "Waiting for model pipeline"} icon={Network}/>
                   <div className="agent-connector"/>
-                  <Agent number="05" title="Adaptive defense" desc="Creates temporary simulated ALLOW/BLOCK policies" status={health?.agents?.agent_5_adaptive_defense ? "Active" : "Unavailable"} icon={ShieldCheck}/>
+                  <Agent number="05" title="Adaptive defense" desc="Creates temporary simulated ALLOW/BLOCK policies" status={health?.agents?.agent_5_adaptive_defense ? "Ready" : "Waiting for model pipeline"} icon={ShieldCheck}/>
                 </div>
                 <div className="fusion-note">
                   <Sparkles size={15}/>
-                  <span>Fusion policy preserves both agent outputs and explains every simulated ALLOW / BLOCK / REVIEW decision.</span>
+                  <span>A3 preserves both model outputs and rationale. A4/A5 run only in chronological replay, where earlier active policies are checked first.</span>
                 </div>
               </div>
             </section>
@@ -374,9 +299,9 @@ export default function App() {
             <section className="panel history-panel">
               <div className="panel-head history-head">
                 <div>
-                  <div className="panel-kicker">BENCHMARK PERFORMANCE & AUDIT TRAIL</div>
+                  <div className="panel-kicker">LOCAL REPLAY AUDIT TRAIL</div>
                   <h3>Recent Local Replay Runs</h3>
-                  <p>Run history and metrics from the local replay database.</p>
+                  <p>Only completed local API runs appear here. Unlabelled replay data does not provide accuracy or false-block metrics.</p>
                 </div>
                 <button className="secondary-btn" onClick={loadHistory}><RefreshCw size={14}/> Refresh</button>
               </div>
@@ -393,14 +318,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {overview && <tr>
-                      <td><b>Completed chronological replay</b></td>
-                      <td>{formatNumber(overview.metrics.total_records)}</td>
-                      <td><span className="tag tag-green">Artifacts present</span></td>
-                      <td>—</td>
-                      <td>—</td>
-                      <td>{(100 - overview.metrics.benign_preservation_rate).toFixed(2)}% benign false blocks</td>
-                    </tr>}
+                    {history.length === 0 && <tr><td colSpan={6} className="empty-inline">{historyMessage || "No local replay runs recorded yet."}</td></tr>}
                     {history.map(row=>(
                       <tr key={row.run_id}>
                         <td>{row.dataset_name}</td>
@@ -436,7 +354,7 @@ export default function App() {
         {activeNav === "Settings & Health" && <SystemHealthView health={health} />}
 
         <footer className="footer">
-          <span>CYBERSENTINEL <i>·</i> JAI 2026</span>
+          <span>CYBERSENTINEL <i>·</i> NETWORK FLOW ANALYSIS</span>
           <span><span className="pulse-dot" /> OFFLINE ANALYSIS ONLY</span>
           <span>BUILD 1.0.0</span>
         </footer>

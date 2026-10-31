@@ -7,6 +7,7 @@ attack signals, and automatic policy expiry based on record offsets.
 from __future__ import annotations
 
 import logging
+import ipaddress
 from typing import Any, Literal
 
 from cybersentinel.contracts import DefenseDecision, DefensePolicy
@@ -73,7 +74,7 @@ class AdaptiveDefenseAgent:
 
         new_policy: DefensePolicy | None = None
 
-        if attack_detected and attack_type and attack_type != "BENIGN" and source_ip.strip():
+        if attack_detected and attack_type and attack_type != "BENIGN" and self._is_valid_ip_scope(source_ip):
             # Generate a new policy for subsequent matching records if one isn't already active
             if source_ip not in self.active_policies:
                 self.policy_counter += 1
@@ -113,6 +114,18 @@ class AdaptiveDefenseAgent:
             new_policy_created=new_policy,
             rationale="Flow permitted for analysis; policy created for future traffic." if new_policy else "Flow allowed.",
         )
+
+    @staticmethod
+    def _is_valid_ip_scope(value: str) -> bool:
+        """Accept only a literal observed IP address for simulated scope.
+
+        The caller supplies only a value parsed from the original flow endpoint field.
+        """
+        try:
+            ipaddress.ip_address(str(value).strip())
+            return True
+        except (ValueError, TypeError):
+            return False
 
     def _prune_expired_policies(self, current_step: int) -> None:
         """Remove policies whose expiry step has passed."""

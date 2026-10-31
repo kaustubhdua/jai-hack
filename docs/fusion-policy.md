@@ -9,9 +9,9 @@ Agent 3 fuses independent evidence from Agent 1 and Agent 2 using a deterministi
 | **Benign Agreement** | `BENIGN` ($C \ge 0.85$) | Not Anomalous ($S \ge \theta$) | `AGREE` | `ALLOW` | Both agents agree traffic matches baseline normal behavior. |
 | **Attack Agreement** | Attack Class ($C \ge 0.85$) | Anomalous ($S < \theta$) | `AGREE` | `BLOCK` | High-confidence attack signature confirmed by independent statistical anomaly. |
 | **Low Confidence** | Any Class ($C < 0.85$) | Any Output | Depends | `REVIEW` | Insufficient classifier confidence requires operator triage. |
-| **Disagreement** | `BENIGN` ($C \ge 0.85$) | Anomalous ($S < \theta$) | `DISAGREE` | `REVIEW` | Potential zero-day exploit or stealth anomaly; flagged for investigation. |
-| **Disagreement** | Attack Class ($C \ge 0.85$) | Not Anomalous ($S \ge \theta$) | `DISAGREE` | `REVIEW` | Signature alert with baseline metrics requires human analyst verification. |
-| **Incomplete / Error** | Crashed or Invalid | Crashed or Invalid | `INCOMPLETE` | `REVIEW` | Fails closed to prevent unauthorized pass-through. |
+| **Disagreement** | `BENIGN` ($C \ge 0.85$) | Anomalous ($S < \theta$) | `CONFLICT` | `REVIEW` | Potential zero-day exploit or stealth anomaly; flagged for investigation. |
+| **Disagreement** | Attack Class ($C \ge 0.85$) | Not Anomalous ($S \ge \theta$) | `CONFLICT` | `REVIEW` | Signature alert with baseline metrics requires human analyst verification. |
+| **Incomplete / Error** | Crashed or Invalid | Crashed or Invalid | `UNCERTAIN` | `REVIEW` | Fails closed to prevent unauthorized pass-through. |
 
 ## Safety & Scope Disclosure
 

@@ -32,7 +32,7 @@ def test_pipeline_fails_safely_when_one_agent_throws():
     pipeline = CyberSentinelPipeline(BrokenThreatAgent(), AnomalyAgent())
     result = pipeline.analyze({"Flow Duration": 120})
     assert result["action"] == "REVIEW"
-    assert result["evidence_status"] == "INCOMPLETE"
+    assert result["evidence_status"] == "UNCERTAIN"
 
 
 def test_pipeline_rejects_missing_model_artifacts(tmp_path):
@@ -47,5 +47,5 @@ def test_invalid_flow_returns_serialized_review_result():
     pipeline = CyberSentinelPipeline(ThreatAgent(), AnomalyAgent())
     result = pipeline.analyze({})
     assert result["action"] == "REVIEW"
-    assert result["evidence_status"] == "INCOMPLETE"
+    assert result["evidence_status"] == "UNCERTAIN"
     assert "latency_ms" in result

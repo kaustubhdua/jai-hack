@@ -11,14 +11,6 @@ interface NodePoint {
   color: string;
 }
 
-interface DataPacket {
-  fromNode: number;
-  toNode: number;
-  progress: number;
-  speed: number;
-  color: string;
-}
-
 export function ParticleBackdrop() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -68,9 +60,7 @@ export function ParticleBackdrop() {
       color: colors[Math.floor(Math.random() * colors.length)],
     }));
 
-    // Dynamic data packets traveling between nodes
-    const packets: DataPacket[] = [];
-    const maxPackets = isMobile ? 4 : 10;
+    // Decorative particles only; this background never represents network traffic or incidents.
 
     // Mouse tracking for interactive distortion
     const mouse = { x: -9999, y: -9999, radius: 150 };
@@ -90,13 +80,9 @@ export function ParticleBackdrop() {
     window.addEventListener("resize", resize);
 
     let animationFrameId = 0;
-    let lastTime = performance.now();
     let radarAngle = 0;
 
-    const render = (now: number) => {
-      const dt = Math.min((now - lastTime) / 1000, 0.1);
-      lastTime = now;
-
+    const render = () => {
       ctx.clearRect(0, 0, width, height);
 
       // 1. Subtle tactical radar sweep line across the background
@@ -160,8 +146,7 @@ export function ParticleBackdrop() {
         ctx.fill();
       }
 
-      // 3. Draw connection filaments between nearby nodes
-      const pairs: [number, number, number][] = [];
+      // 3. Draw decorative connection filaments between nearby background particles
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const dx = nodes[i].x - nodes[j].x;
@@ -177,7 +162,6 @@ export function ParticleBackdrop() {
             ctx.lineWidth = 0.85;
             ctx.stroke();
 
-            pairs.push([i, j, dist]);
           }
         }
 
@@ -191,49 +175,6 @@ export function ParticleBackdrop() {
           ctx.strokeStyle = `rgba(52, 211, 153, ${alpha})`;
           ctx.lineWidth = 1.1;
           ctx.stroke();
-        }
-      }
-
-      // 4. Manage and draw traveling data packets
-      if (!prefersReducedMotion && pairs.length > 0) {
-        if (packets.length < maxPackets && Math.random() < 0.06) {
-          const randomPair = pairs[Math.floor(Math.random() * pairs.length)];
-          packets.push({
-            fromNode: randomPair[0],
-            toNode: randomPair[1],
-            progress: 0,
-            speed: 0.4 + Math.random() * 0.8,
-            color: Math.random() > 0.3 ? "rgba(56, 189, 248, 0.85)" : "rgba(52, 211, 153, 0.9)",
-          });
-        }
-
-        for (let k = packets.length - 1; k >= 0; k--) {
-          const pkt = packets[k];
-          pkt.progress += pkt.speed * dt;
-
-          if (pkt.progress >= 1) {
-            packets.splice(k, 1);
-            continue;
-          }
-
-          const n1 = nodes[pkt.fromNode];
-          const n2 = nodes[pkt.toNode];
-          if (!n1 || !n2) {
-            packets.splice(k, 1);
-            continue;
-          }
-
-          const curX = n1.x + (n2.x - n1.x) * pkt.progress;
-          const curY = n1.y + (n2.y - n1.y) * pkt.progress;
-
-          // Glowing traveling packet spark
-          ctx.beginPath();
-          ctx.arc(curX, curY, 2.2, 0, Math.PI * 2);
-          ctx.fillStyle = pkt.color;
-          ctx.shadowColor = pkt.color;
-          ctx.shadowBlur = 8;
-          ctx.fill();
-          ctx.shadowBlur = 0;
         }
       }
 

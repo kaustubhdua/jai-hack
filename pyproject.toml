@@ -7,7 +7,7 @@ name = "cybersentinel"
 version = "0.1.0"
 description = "Offline multi-agent network-flow intrusion detection prototype"
 requires-python = ">=3.10"
-dependencies = ["fastapi>=0.115,<1.0", "numpy>=1.26", "pandas>=2.1", "scikit-learn>=1.4", "joblib>=1.3"]
+dependencies = ["fastapi>=0.115,<1.0", "python-multipart>=0.0.20", "numpy>=1.26", "pandas>=2.1", "scikit-learn>=1.4", "joblib>=1.3"]
 
 [project.optional-dependencies]
 ml = ["numpy>=1.26", "pandas>=2.1", "scikit-learn>=1.4", "joblib>=1.3", "pyarrow>=14.0"]

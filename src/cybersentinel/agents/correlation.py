@@ -1,13 +1,15 @@
 """Temporal Correlation Agent (Agent 4).
 
-Groups related suspicious flows using observed endpoints and time windows.
-Emits group IDs, member records, and explicit supporting evidence.
+Groups suspicious flows using literal observed endpoints only. Missing endpoints remain unknown.
+Destination endpoints are never synthesized.
 """
 from __future__ import annotations
 
 from collections import Counter, defaultdict, deque
-import hashlib
+import ipaddress
+from datetime import datetime
 from typing import Any
+import pandas as pd
 
 from cybersentinel.contracts import CorrelationGroup, CorrelationResult
 
@@ -15,8 +17,11 @@ from cybersentinel.contracts import CorrelationGroup, CorrelationResult
 class TemporalCorrelationAgent:
     """Correlate suspicious network flows across sliding time or sequence windows."""
 
-    def __init__(self, window_size: int = 150):
+    def __init__(self, window_size: int = 150, window_seconds: int = 300):
+        if window_size < 1 or window_seconds < 1:
+            raise ValueError("window_size and window_seconds must be positive")
         self.window_size = window_size
+        self.window_seconds = window_seconds
         self.history: deque[dict[str, Any]] = deque()
         self.source_port_counts: defaultdict[str, Counter[int]] = defaultdict(Counter)
         self.dest_source_counts: defaultdict[str, Counter[str]] = defaultdict(Counter)
@@ -43,44 +48,84 @@ class TemporalCorrelationAgent:
 
     @staticmethod
     def derive_source_identity(flow: dict[str, Any]) -> str:
-        """Return a native source IP or a disclosed stable TCP-stack-derived identity.
-
-        No identity is invented from destination ports or per-flow counters. If the
-        required fingerprint fields are unavailable, return an empty string so the
-        defense agent cannot create an over-broad policy.
-        """
-        for key in ("source_ip", "Source IP", "src_ip", "src", "Source_IP"):
+        """Return only a literal observed source IP; never synthesize an endpoint."""
+        for key in ("source_ip", "Source IP", "Source_IP", "src_ip", "src"):
             value = flow.get(key)
-            if value is not None and str(value).strip():
-                return str(value).strip()
-
-        fingerprint_fields = ("Init_Win_bytes_forward", "min_seg_size_forward", "Fwd Header Length")
-        values = [flow.get(key) for key in fingerprint_fields]
-        if any(value is None or str(value).strip() in {"", "nan", "None"} for value in values):
-            return ""
-        seed = "|".join(str(value).strip() for value in values)
-        digest = hashlib.sha256(seed.encode("utf-8")).digest()
-        # RFC1918-shaped synthetic identity, not a native or observed IP address.
-        return f"10.{digest[0]}.{digest[1]}.{digest[2]}"
+            if value is None or not str(value).strip():
+                continue
+            try:
+                return str(ipaddress.ip_address(str(value).strip()))
+            except ValueError:
+                continue
+        return ""
 
     @staticmethod
+    def has_observed_source_ip(flow: dict[str, Any]) -> bool:
+        """Return whether the flow contains a parseable, native source IP field."""
+        for key in ("source_ip", "Source IP", "Source_IP", "src_ip", "src"):
+            value = flow.get(key)
+            if value is None or not str(value).strip():
+                continue
+            try:
+                ipaddress.ip_address(str(value).strip())
+                return True
+            except ValueError:
+                continue
+        return False
+    @staticmethod
     def extract_endpoints(flow: dict[str, Any]) -> tuple[str, str, int]:
-        """Extract observed endpoints; only source identity may be derived."""
+        """Extract literal observed endpoints; missing endpoint identities remain unknown."""
         src_ip = TemporalCorrelationAgent.derive_source_identity(flow)
 
-        dst_ip = None
+        dst_ip = ""
         for key in ("destination_ip", "Destination IP", "dst_ip", "dst", "Destination_IP"):
             value = flow.get(key)
-            if value is not None and str(value).strip():
-                dst_ip = str(value).strip()
+            if value is None or not str(value).strip():
+                continue
+            try:
+                dst_ip = str(ipaddress.ip_address(str(value).strip()))
                 break
+            except ValueError:
+                # Unparseable destination metadata is not an endpoint identity.
+                continue
         # Destination is intentionally left unknown when the dataset omits it.
         dport_value = flow.get("Destination Port", 0)
         try:
-            dport = int(dport_value)
-        except (TypeError, ValueError):
+            numeric_port = float(dport_value)
+            dport = int(numeric_port) if numeric_port.is_integer() and 0 <= numeric_port <= 65535 else 0
+        except (TypeError, ValueError, OverflowError):
             dport = 0
-        return src_ip, dst_ip or "", dport
+        return src_ip, dst_ip, dport
+
+    @staticmethod
+    def _parse_timestamp(flow: dict[str, Any]) -> datetime | None:
+        for key in ("Timestamp", "timestamp", "Flow Start", "flow_start", "start_time"):
+            value = flow.get(key)
+            if value is None or str(value).strip() == "":
+                continue
+            try:
+                parsed = pd.to_datetime(value, utc=True, errors="coerce")
+                if pd.isna(parsed):
+                    continue
+                return parsed.to_pydatetime()
+            except (TypeError, ValueError, OverflowError):
+                continue
+        return None
+
+    def _evict_oldest(self) -> None:
+        old = self.history.popleft()
+        old_src, old_dst, old_dport = old["src_ip"], old["dst_ip"], old["dport"]
+        self.source_port_counts[old_src][old_dport] -= 1
+        if self.source_port_counts[old_src][old_dport] <= 0:
+            del self.source_port_counts[old_src][old_dport]
+        if not self.source_port_counts[old_src]:
+            del self.source_port_counts[old_src]
+        if old_dst:
+            self.dest_source_counts[old_dst][old_src] -= 1
+            if self.dest_source_counts[old_dst][old_src] <= 0:
+                del self.dest_source_counts[old_dst][old_src]
+            if not self.dest_source_counts[old_dst]:
+                del self.dest_source_counts[old_dst]
 
     def correlate(
         self,
@@ -91,32 +136,27 @@ class TemporalCorrelationAgent:
     ) -> CorrelationResult:
         """Analyze a flow in sequence and correlate with recent sliding-window activity."""
         src_ip, dst_ip, dport = self.extract_endpoints(flow)
+        event_time = self._parse_timestamp(flow)
         if not src_ip:
             return CorrelationResult(
                 correlated=False,
                 status="not_ready",
-                message="No native source IP or complete TCP-stack fingerprint is available for endpoint correlation.",
+                message="No valid observed source IP is available for endpoint correlation.",
             )
 
-        # Evict oldest item if sliding window is full
-        if len(self.history) >= self.window_size:
-            old = self.history.popleft()
-            old_src = old["src_ip"]
-            old_dst = old["dst_ip"]
-            old_dport = old["dport"]
-
-            self.source_port_counts[old_src][old_dport] -= 1
-            if self.source_port_counts[old_src][old_dport] <= 0:
-                del self.source_port_counts[old_src][old_dport]
-            if not self.source_port_counts[old_src]:
-                del self.source_port_counts[old_src]
-
-            if old_dst:
-                self.dest_source_counts[old_dst][old_src] -= 1
-                if self.dest_source_counts[old_dst][old_src] <= 0:
-                    del self.dest_source_counts[old_dst][old_src]
-                if not self.dest_source_counts[old_dst]:
-                    del self.dest_source_counts[old_dst]
+        # Prefer an elapsed-time window when timestamps are present; retain a hard
+        # record-count cap as a memory bound and fallback for timestamp-less datasets.
+        if event_time is not None:
+            while self.history:
+                oldest_time = self.history[0].get("timestamp")
+                if oldest_time is None:
+                    break
+                age = (event_time - oldest_time).total_seconds()
+                if age <= self.window_seconds:
+                    break
+                self._evict_oldest()
+        while len(self.history) >= self.window_size:
+            self._evict_oldest()
 
         # Track in sliding window structures
         self.history.append({
@@ -125,11 +165,22 @@ class TemporalCorrelationAgent:
             "dst_ip": dst_ip,
             "dport": dport,
             "threat_class": threat_class,
-            "confidence": confidence or 0.0,
+            "confidence": confidence if confidence is not None else 0.0,
+            "timestamp": event_time,
         })
         self.source_port_counts[src_ip][dport] += 1
         if dst_ip:
             self.dest_source_counts[dst_ip][src_ip] += 1
+
+        # Bound group lifecycle to the active replay window. Groups with no
+        # surviving member in the window are no longer considered active.
+        live_record_ids = {item["record_id"] for item in self.history}
+        stale_groups = [
+            key for key, group in self.active_groups.items()
+            if group.end_record_id not in live_record_ids
+        ]
+        for key in stale_groups:
+            del self.active_groups[key]
 
         evidence: list[str] = []
         attack_type: str | None = None
@@ -142,16 +193,16 @@ class TemporalCorrelationAgent:
             correlated = True
             attack_type = "PORT_SCAN"
             evidence.append(
-                f"Source {src_ip} probed {len(target_ports)} distinct ports within {self.window_size}-flow window."
+                f"Source {src_ip} probed {len(target_ports)} distinct ports within configured correlation window ({self.window_seconds}s when timestamps are present; otherwise {self.window_size} records)."
             )
 
         # Check Pattern 2: Distributed Denial of Service (many sources targeting single destination)
         sources_targeting_dest = self.dest_source_counts[dst_ip] if dst_ip else {}
-        if dst_ip and len(sources_targeting_dest) >= 8 and (threat_class in ("DDOS", "DOS") or dport in (80, 443, 8080)):
+        if dst_ip and len(sources_targeting_dest) >= 8 and threat_class in ("DDOS", "DOS"):
             correlated = True
             attack_type = "DDOS"
             evidence.append(
-                f"Destination {dst_ip}:{dport} targeted by {len(sources_targeting_dest)} distinct source endpoints."
+                f"Destination {dst_ip}:{dport} targeted by {len(sources_targeting_dest)} distinct source endpoints; the current flow is independently classified as {threat_class}."
             )
 
         # Check Pattern 3: Authentication Brute Force (repeated hits to SSH/FTP/RDP)
@@ -159,11 +210,11 @@ class TemporalCorrelationAgent:
             f for f in self.history
             if f["src_ip"] == src_ip and f["dport"] in (21, 22, 23, 3389)
         ]
-        if len(recent_auth_flows) >= 4:
+        if len(recent_auth_flows) >= 4 and threat_class == "BRUTE_FORCE":
             correlated = True
             attack_type = "BRUTE_FORCE"
             evidence.append(
-                f"Source {src_ip} executed {len(recent_auth_flows)} rapid auth attempts on port {recent_auth_flows[-1]['dport']}."
+                f"Source {src_ip} generated {len(recent_auth_flows)} recent authentication flows on port {recent_auth_flows[-1]['dport']}; the current flow is independently classified as BRUTE_FORCE."
             )
 
         # Check Pattern 4: Volumetric DoS Surge from single source
@@ -209,9 +260,13 @@ class TemporalCorrelationAgent:
                 existing.end_record_id = record_id
                 if record_id not in existing.member_record_ids:
                     existing.member_record_ids.append(record_id)
+                # Keep explanations inspectable without allowing a long-running
+                # source to grow group state without bound.
+                existing.member_record_ids = existing.member_record_ids[-500:]
                 target_str = f"{dst_ip}:{dport}" if dst_ip else ""
                 if target_str and target_str not in existing.target_endpoints:
                     existing.target_endpoints.append(target_str)
+                existing.target_endpoints = existing.target_endpoints[-100:]
                 existing.evidence = evidence
 
             group = self.active_groups[group_key]

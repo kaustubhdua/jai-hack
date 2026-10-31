@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import {
-  Activity, AlertTriangle, ArrowRight, Check, ChevronRight, Cpu,
-  Database, Download, ExternalLink, FileSpreadsheet, Fingerprint,
-  Gauge, Layers, LockKeyhole, RefreshCw, Shield, ShieldAlert,
-  ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp
+  Activity, ExternalLink, Gauge, Layers, LockKeyhole,
+  RefreshCw, ShieldAlert, ShieldCheck
 } from "lucide-react";
 
 interface EvaluationData {

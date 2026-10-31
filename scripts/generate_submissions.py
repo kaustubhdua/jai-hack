@@ -11,6 +11,8 @@ import sys
 import pandas as pd
 
 from cybersentinel.replay import ReplayEngine
+from cybersentinel.replay.input_validation import validate_replay_input
+from validate_submissions import validate as validate_submission_bundle
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("generate_submissions")
@@ -21,8 +23,8 @@ def main() -> int:
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("data/processed/eval_prepared.parquet"),
-        help="Path to input test/eval dataset (parquet or csv)",
+        default=Path("data/processed/hidden_replay_input.csv"),
+        help="Path to unlabelled organizer hidden replay input (parquet or csv)",
     )
     parser.add_argument(
         "--threat-model",
@@ -39,8 +41,8 @@ def main() -> int:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("submissions"),
-        help="Output directory to save classification.csv, policy.csv, and replay.csv",
+        default=Path("outputs/submission"),
+        help="Output directory to save classification.csv, policies.csv, and replay.csv",
     )
     parser.add_argument(
         "--limit",
@@ -60,6 +62,7 @@ def main() -> int:
     else:
         df = pd.read_csv(args.input)
 
+    limited_run = args.limit is not None and args.limit > 0 and args.limit < len(df)
     if args.limit and args.limit > 0:
         logger.info("Limiting replay to first %d records", args.limit)
         df = df.iloc[:args.limit]
@@ -70,6 +73,16 @@ def main() -> int:
         anomaly_path=args.anomaly_model,
     )
 
+    input_report = validate_replay_input(df, {
+        "Agent 1": engine.threat_agent.model.feature_columns,
+        "Agent 2": engine.anomaly_agent.feature_columns,
+    })
+    if not input_report["valid"]:
+        logger.error("Replay input validation failed: %s", json.dumps(input_report, indent=2))
+        return 2
+    logger.info("Replay input validated: %d records, %d numeric features, %d rows with both observed endpoints.",
+                input_report["rows"], input_report["feature_count"], input_report["rows_with_both_observed_endpoints"])
+
     def on_progress(done: int, total: int) -> None:
         pct = done / total * 100
         logger.info("Replay progress: %d/%d records (%.1f%%)", done, total, pct)
@@ -79,36 +92,40 @@ def main() -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. classification.csv
-    class_csv = engine.export_csv(
-        results["classification_rows"],
-        ["record_id", "predicted_class", "anomaly score", "evidence status"],
-    )
-    (args.output_dir / "classification.csv").write_text(class_csv, encoding="utf-8")
-    logger.info("Wrote %s", args.output_dir / "classification.csv")
+    # Use the engine's single canonical writer so CLI and API emit the same
+    # exact organizer templates and filenames.
+    generated_files = engine.write_submission_files(results, args.output_dir)
+    for name, path in generated_files.items():
+        logger.info("Wrote %s", path)
 
-    # 2. policy.csv
-    policy_csv = engine.export_csv(
-        results["policy_rows"],
-        ["policy_id", "activated_after_record_id", "scope_type", "scope_value", "expires_after_record_id", "policy_action"],
-    )
-    (args.output_dir / "policy.csv").write_text(policy_csv, encoding="utf-8")
-    logger.info("Wrote %s", args.output_dir / "policy.csv")
+    # 4. Independently validate full submissions against the original input.
+    summary = dict(results["metrics"])
+    if limited_run:
+        # A limited replay is useful for smoke testing, but can never be accepted
+        # as a complete submission because it intentionally omits input records.
+        validation = {"valid": False, "status": "SKIPPED_LIMITED_RUN", "errors": []}
+        logger.warning("Submission validation skipped: --limit produced an intentionally incomplete replay.")
+    else:
+        errors = validate_submission_bundle(args.input, args.output_dir)
+        validation = {"valid": not errors, "status": "PASSED" if not errors else "FAILED", "errors": errors}
+        if errors:
+            logger.error("Submission validation failed with %d issue(s).", len(errors))
+            for error in errors[:30]:
+                logger.error("- %s", error)
+    validation_file = args.output_dir / "validation_report.json"
+    validation_file.write_text(json.dumps(validation, indent=2), encoding="utf-8")
+    logger.info("Wrote %s", validation_file)
+    summary["submission_validation"] = validation
 
-    # 3. replay.csv
-    replay_csv = engine.export_csv(
-        results["replay_rows"],
-        ["record_id", "action", "applied_policy_id"],
-    )
-    (args.output_dir / "replay.csv").write_text(replay_csv, encoding="utf-8")
-    logger.info("Wrote %s", args.output_dir / "replay.csv")
-
-    # 4. summary.json
+    # 5. summary.json
     summary_file = args.output_dir / "summary.json"
-    summary_file.write_text(json.dumps(results["metrics"], indent=2), encoding="utf-8")
+    summary_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     logger.info("Wrote %s", summary_file)
 
-    logger.info("Replay completed successfully! Summary metrics: %s", results["metrics"])
+    if not validation["valid"]:
+        logger.error("Replay generated files, but the output is not submission-ready.")
+        return 2
+    logger.info("Replay and independent submission validation completed. Summary metrics: %s", summary)
     return 0
 
 

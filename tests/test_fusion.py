@@ -26,7 +26,7 @@ def test_agent_disagreement_requires_review():
         AnomalyDetectionResult(-0.3, False),
     )
     assert result.action == "REVIEW"
-    assert result.evidence_status == "DISAGREE"
+    assert result.evidence_status == "CONFLICT"
 
 
 def test_incomplete_agent_evidence_fails_to_review():
@@ -35,7 +35,7 @@ def test_incomplete_agent_evidence_fails_to_review():
         AnomalyDetectionResult(0.5, True),
     )
     assert result.action == "REVIEW"
-    assert result.evidence_status == "INCOMPLETE"
+    assert result.evidence_status == "UNCERTAIN"
 
 
 def test_low_confidence_never_auto_allows_or_blocks():
@@ -52,4 +52,4 @@ def test_missing_or_nonfinite_anomaly_score_requires_review():
         AnomalyDetectionResult(float("nan"), True),
     )
     assert result.action == "REVIEW"
-    assert result.evidence_status == "INCOMPLETE"
+    assert result.evidence_status == "UNCERTAIN"

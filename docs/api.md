@@ -77,3 +77,9 @@ Replays a batch of network flows (up to 1,000 flows per request).
   "results": [...]
 }
 ```
+
+### 5. `GET /api/replay/validate`
+Validates generated submission CSVs against the original installed unlabelled hidden replay input. The source dataset—not `classification.csv`—is authoritative for expected record coverage and ordering. If the evaluation dataset is missing, the endpoint returns `INPUT_DATASET_NOT_AVAILABLE` and does not claim the bundle is valid.
+
+### Official replay validation
+`POST /api/replay/run-official` writes the three CSVs and validates them against the record IDs from the original `hidden_replay_input.csv` or `.parquet` input. A successful frontend build or a self-consistent output bundle is not evidence of organiser acceptance; run the independent validator against the exact authorised input before submission.

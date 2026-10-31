@@ -41,9 +41,9 @@ class EvidenceFusionAgent:
         if not t_ok or not a_ok:
             return FusionResult(
                 final_class=self._get(threat, "predicted_class") if t_ok else None,
-                evidence_status="INCOMPLETE",
+                evidence_status="UNCERTAIN",
                 action="REVIEW",
-                agent_agreement="INCOMPLETE",
+                agent_agreement="UNCERTAIN",
                 confidence=float(self._get(threat, "confidence")) if t_ok else 0.0,
                 supporting_evidence=self._get(anomaly, "evidence", []) if anomaly is not None else [],
                 rationale=[
@@ -57,7 +57,7 @@ class EvidenceFusionAgent:
         predicted = self._get(threat, "predicted_class")
         confidence = float(self._get(threat, "confidence"))
         is_anomaly = self._get(anomaly, "is_anomaly")
-        evidence_status = "AGREE" if ((predicted == "BENIGN") == (not is_anomaly)) else "DISAGREE"
+        evidence_status = "AGREE" if ((predicted == "BENIGN") == (not is_anomaly)) else "CONFLICT"
 
         if evidence_status == "AGREE" and predicted == "BENIGN":
             action = "ALLOW" if confidence >= HIGH_CONFIDENCE else "REVIEW"
@@ -69,7 +69,7 @@ class EvidenceFusionAgent:
             rationale = ["Classifier predicts an attack and anomaly detector independently flags the flow."]
         else:
             action = "REVIEW"
-            agreement = "DISAGREE"
+            agreement = "CONFLICT"
             rationale = ["Classifier and anomaly detector disagree; human review is required."]
 
         rationale.append(f"Classifier confidence: {confidence:.4f}.")

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, useEffect } from "react";
 import {
   Activity, Check, Database, Download, FileSpreadsheet, Fingerprint,
-  Gauge, Layers, LockKeyhole, Play, RefreshCw,
+  Layers, LockKeyhole, Play, RefreshCw,
   ShieldAlert, ShieldCheck, Copy, FileCode2, Terminal
 } from "lucide-react";
 const NetworkTopology3D = lazy(() => import("./components/NetworkTopology3D").then(module => ({ default: module.NetworkTopology3D })));
@@ -69,7 +69,7 @@ export function TopologyCommandCentre() {
 
       <div style={{ height: 480, position: "relative", background: "radial-gradient(circle at center, rgba(15, 30, 58, 0.45) 0%, rgba(3, 7, 18, 0.95) 100%)", borderRadius: 12, margin: "12px 0 16px 0", border: "1px solid rgba(56, 189, 248, 0.22)", overflow: "hidden", boxShadow: "inset 0 0 50px rgba(0, 0, 0, 0.8), 0 0 25px rgba(56, 189, 248, 0.1)" }}>
         <Suspense fallback={<div className="topology-loading" role="status">Loading 3D topology…</div>}>
-      <NetworkTopology3D threatLevel={threatLevel} />
+      <NetworkTopology3D visualTone={threatLevel === "CRITICAL" ? "ROSE" : threatLevel === "ELEVATED" ? "AMBER" : "COOL"} />
     </Suspense>
         <div style={{ position: "absolute", bottom: 12, left: 14, fontSize: 11, color: "var(--muted)", pointerEvents: "none" }}>
           <b>ACTIVE NODES:</b> A1 Threat Classifier · A2 Anomaly Isolation · A3 Fusion Matrix · A4 Temporal Window · A5 Adaptive Defense

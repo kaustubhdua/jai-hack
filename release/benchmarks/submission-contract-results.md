@@ -1,74 +1,45 @@
-# CyberSentinel — Submission Contract (Corrected Against Official Day 2 Brief)
+# CyberSentinel — Official Level 2 Submission Contract
 
-**Status:** Corrected documentation. A fresh local run of the current branch is still required before declaring submission-ready.
-
-## Source of truth
-
-The Day 2 briefing requires three CSVs and explicitly specifies the following record-level contracts. The official brief's per-record clarification takes precedence over the compact/partially obscured table layout.
+**Source of truth:** the organizer-provided CSV templates supplied with the hidden replay set. The files are header-only templates; the replay generator must populate them without changing their exact columns or order.
 
 ## 1. classification.csv
 
-Exact required columns, in order:
+Exact columns:
 
-`record_id,predicted_class,anomaly score,evidence status`
+`record_id,predicted_class,anomaly_score,evidence_status`
 
-Requirements:
+- Exactly one row for every hidden input record, in the same order.
+- `predicted_class` must be one of BENIGN, BRUTE_FORCE, DOS, DDOS, PORT_SCAN.
+- `anomaly_score` must be finite and within [0,1]; higher means more anomalous. It is a bounded index, not a probability.
+- `evidence_status` must be AGREE, CONFLICT, or UNCERTAIN.
+- Do not include hidden ground-truth labels.
 
-- Exactly one prediction for every organiser-provided evaluation record ID.
-- Five-class taxonomy only: `BENIGN`, `BRUTE_FORCE`, `DOS`, `DDOS`, `PORT_SCAN`.
-- Predictions must be generated from permitted flow features.
-- Include predictions for records that are later blocked by an active policy.
-- Do not submit actual/ground-truth labels.
-- Anomaly score and evidence status must reflect the implemented Agent 2 / Agent 3 outputs.
+## 2. replay.csv
 
-## 2. policy.csv
+Exact columns:
 
-Exact required columns, in order:
+`record_id,action,active_policy_id`
 
-`policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id,policy_action`
+- Exactly one row per hidden input record, in original `seq` order.
+- `action` is ALLOW or BLOCK.
+- ALLOW must use `active_policy_id=NONE` and must not have a matching active policy.
+- BLOCK must reference the lexicographically smallest matching active `policy_id`.
 
-Requirements:
+## 3. policies.csv
 
-- Use organiser-provided record IDs.
-- Scored interface requires `scope_type=SOURCE_IP` and `policy_action=BLOCK`.
-- A policy is activated only after its triggering record.
-- Expiry must follow the implementation's documented record-boundary convention.
-- Policy scope values derived from anonymised features must be disclosed as derived identities, never represented as native IP observations.
+Exact columns:
 
-## 3. replay.csv
+`policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id`
 
-The briefing's explicit per-record clarification requires:
+- Zero or more rows; no fixed policy row count.
+- `policy_id` is unique.
+- `scope_type` is SOURCE_IP, DESTINATION_IP, or SRC_DST_PAIR.
+- `scope_value` must match literal observed endpoint metadata on the policy's activation record. Pair format is `source_ip|destination_ip`.
+- A policy becomes active on the record after `activated_after_record_id` and remains active through `expires_after_record_id`, inclusive.
+- Each row represents a simulated BLOCK policy. The organizer template has no `policy_action` column.
 
-`record_id,action,applied_policy_id`
+## 4. Independent validation
 
-Requirements:
+The validator checks exact headers, exact record coverage/order, five-class predictions, finite [0,1] anomaly scores, evidence statuses, unique policy IDs, observed endpoint scope values, activation-exclusive/expiry-inclusive windows, ALLOW/NONE behavior, BLOCK references, and the lexicographically smallest matching policy tie-break.
 
-- Every evaluation record exactly once.
-- `action` must be `ALLOW` or `BLOCK`.
-- `BLOCK` must reference a valid policy that was activated earlier and is still active for that record.
-- `ALLOW` must have an empty `applied_policy_id`.
-- A policy cannot block the record that triggered its creation.
-
-## 4. Required validation
-
-The independent validator must check:
-
-- Exact header names and order.
-- Exact organiser record-ID coverage and uniqueness.
-- Five-class taxonomy.
-- Numeric anomaly-score validity and evidence-status validity.
-- Unique policy IDs and valid policy scope/action.
-- Activation and expiry order.
-- Referential integrity from replay to policy.
-- Active-policy matching at each BLOCK record.
-- No self-blocking.
-- No policy lookahead or hidden-label use.
-- No duplicate or missing replay/classification records.
-
-A local validator result is not proof that the organiser API accepted the files. Do not claim upload success until the organiser endpoint returns an actual successful response.
-
-## 5. Historical report correction
-
-An earlier version of this dossier described a different schema (`flow_id`, `predicted_label`, `confidence`, `is_anomaly`; and alternate policy/replay columns). Those columns do **not** match the Day 2 briefing and must not be used for the official submission.
-
-The current generator in `src/cybersentinel/replay/engine.py` writes the four-column classification schema, six-column policy schema, and three-column replay schema above. Re-run `python scripts/generate_submissions.py` and the current validator after any replay/model changes.
+A local validator pass does not prove organizer acceptance. Only an actual successful organizer response or receipt establishes acceptance. The supplied materials do not include API credentials or an upload receipt.

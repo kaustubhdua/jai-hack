@@ -88,3 +88,14 @@ def test_defense_does_not_create_policy_without_source_identity():
     assert decision.action == "ALLOW"
     assert decision.new_policy_created is None
     assert agent.all_policies == []
+
+
+def test_defense_rejects_fingerprint_or_non_ip_scope():
+    agent = AdaptiveDefenseAgent(default_duration=10)
+    for identity in ("10.1.2.3-derived", "host-fingerprint-abc", ""):
+        decision = agent.handle_post_analysis(
+            record_id="rec-1", source_ip=identity, current_step=0,
+            attack_detected=True, attack_type="DOS", confidence=0.99,
+        )
+        assert decision.new_policy_created is None
+    assert agent.all_policies == []

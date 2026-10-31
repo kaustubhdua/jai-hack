@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
-  Activity, ArrowRight, Cpu, LockKeyhole, Network, Sparkles,
-  ShieldAlert, Copy, Check, BarChart3
+  Activity, ArrowRight, Cpu, LockKeyhole, Network,
+  Copy, Check, BarChart3
 } from "lucide-react";
 
 type FlowResult = {
@@ -9,177 +9,22 @@ type FlowResult = {
   evidence_status: string;
   action: string;
   rationale: string[];
-  threat_detection?: unknown;
-  anomaly_detection?: unknown;
+  threat_detection?: { predicted_class?: string; confidence?: number; status?: string; message?: string };
+  model_provenance?: { a1_confidence_calibrated?: boolean; a2_score_is_probability?: boolean };
+  execution_mode?: string;
+  stateful_agents?: string;
+  anomaly_detection?: {
+    anomaly_score?: number | null;
+    is_anomaly?: boolean | null;
+    evidence?: { feature: string; evidence_code: string; observed_value: number; baseline_q01: number; baseline_median: number; baseline_q99: number; deviation_strength_iqr: number; interpretation: string; }[];
+    status?: string;
+    message?: string;
+  };
   latency_ms?: number;
 };
 
-interface MitreInfo {
-  tactic: string;
-  techniqueId: string;
-  techniqueName: string;
-  severity: "CRITICAL" | "HIGH" | "MEDIUM" | "INFO";
-  nistGuidance: string[];
-}
-
-const MITRE_MAPPING: Record<string, MitreInfo> = {
-  PORT_SCAN: {
-    tactic: "Discovery (TA0007)",
-    techniqueId: "T1046",
-    techniqueName: "Network Service Discovery",
-    severity: "HIGH",
-    nistGuidance: [
-      "Containment: Enforce temporal rate-limiting and CIDR /24 perimeter drops on scanning source.",
-      "Eradication: Inspect host for automated recon toolkits (Nmap, Masscan, ZMap).",
-      "Recovery: Verify firewall ingress filters and close unneeded open listening ports."
-    ]
-  },
-  DOS: {
-    tactic: "Impact (TA0040)",
-    techniqueId: "T1498.001",
-    techniqueName: "Network Denial of Service (Direct Flood)",
-    severity: "CRITICAL",
-    nistGuidance: [
-      "Containment: Drop high-rate TCP/UDP packets matching abnormal IAT/byte burst patterns.",
-      "Eradication: Blackhole hostile synthetic IP prefixes at the edge router.",
-      "Recovery: Restore server connection pool and restart exhausted daemon services."
-    ]
-  },
-  DDOS: {
-    tactic: "Impact (TA0040)",
-    techniqueId: "T1499.002",
-    techniqueName: "Endpoint Denial of Service (Service Exhaustion)",
-    severity: "CRITICAL",
-    nistGuidance: [
-      "Containment: Engage upstream volumetric scrubbers and activate multi-host CIDR /24 blocks.",
-      "Eradication: Trace source convergence points and coordinate ISP edge filtering.",
-      "Recovery: Validate reverse-proxy health and scale backend container replicas."
-    ]
-  },
-  BRUTE_FORCE: {
-    tactic: "Credential Access (TA0006)",
-    techniqueId: "T1110.001",
-    techniqueName: "Brute Force (Password Guessing)",
-    severity: "HIGH",
-    nistGuidance: [
-      "Containment: Apply immediate 150-step host quarantine on authentication endpoints (SSH/RDP).",
-      "Eradication: Enforce account lockouts and invalidate potentially compromised sessions.",
-      "Recovery: Rotate credentials and mandate multi-factor authentication (MFA)."
-    ]
-  },
-  BENIGN: {
-    tactic: "Normal Operations",
-    techniqueId: "T0000",
-    techniqueName: "Legitimate Enterprise Traffic Baseline",
-    severity: "INFO",
-    nistGuidance: [
-      "Observation: Traffic conforms to verified protocol specifications and baseline timing.",
-      "Preservation: Allow traffic without simulated packet filter drops or artificial throttling.",
-      "Audit: Maintain flow logging for continuous behavioral baseline updates."
-    ]
-  }
-};
-
-const PRESETS: { name: string; flow: Record<string, number> }[] = [
-  {
-    name: "Normal Benign Traffic",
-    flow: {
-      "Destination Port": 443,
-      "Flow Duration": 120000,
-      "Total Fwd Packets": 12,
-      "Total Backward Packets": 15,
-      "Total Length of Fwd Packets": 1500,
-      "Total Length of Bwd Packets": 4200,
-      "Flow Bytes/s": 47500,
-      "Flow Packets/s": 225,
-      "Flow IAT Mean": 4500,
-      "FIN Flag Count": 1,
-      "SYN Flag Count": 1,
-      "RST Flag Count": 0,
-      "PSH Flag Count": 4,
-      "ACK Flag Count": 26
-    }
-  },
-  {
-    name: "DoS SYN Flood",
-    flow: {
-      "Destination Port": 80,
-      "Flow Duration": 1500,
-      "Total Fwd Packets": 120,
-      "Total Backward Packets": 0,
-      "Total Length of Fwd Packets": 7200,
-      "Total Length of Bwd Packets": 0,
-      "Flow Bytes/s": 4800000,
-      "Flow Packets/s": 80000,
-      "Flow IAT Mean": 12.5,
-      "SYN Flag Count": 120,
-      "RST Flag Count": 0,
-      "ACK Flag Count": 0
-    }
-  },
-  {
-    name: "DDoS Volumetric",
-    flow: {
-      "Destination Port": 80,
-      "Flow Duration": 800,
-      "Total Fwd Packets": 5000,
-      "Total Backward Packets": 0,
-      "Total Length of Fwd Packets": 320000,
-      "Total Length of Bwd Packets": 0,
-      "Flow Bytes/s": 45000000,
-      "Flow Packets/s": 6250000,
-      "Flow IAT Mean": 0.16,
-      "SYN Flag Count": 5000,
-      "ACK Flag Count": 0
-    }
-  },
-  {
-    name: "Port Sweep Scan",
-    flow: {
-      "Destination Port": 445,
-      "Flow Duration": 250,
-      "Total Fwd Packets": 2,
-      "Total Backward Packets": 0,
-      "Total Length of Fwd Packets": 0,
-      "Total Length of Bwd Packets": 0,
-      "Flow Packets/s": 8000,
-      "SYN Flag Count": 2,
-      "ACK Flag Count": 0
-    }
-  },
-  {
-    name: "Brute Force SSH",
-    flow: {
-      "Destination Port": 22,
-      "Flow Duration": 950000,
-      "Total Fwd Packets": 35,
-      "Total Backward Packets": 32,
-      "Total Length of Fwd Packets": 3200,
-      "Total Length of Bwd Packets": 3800,
-      "Flow Packets/s": 70,
-      "PSH Flag Count": 15,
-      "ACK Flag Count": 66
-    }
-  },
-  {
-    name: "Zero-Day Anomaly",
-    flow: {
-      "Destination Port": 8088,
-      "Flow Duration": 89000000,
-      "Total Fwd Packets": 9500,
-      "Total Backward Packets": 12,
-      "Total Length of Fwd Packets": 1250000,
-      "Total Length of Bwd Packets": 480,
-      "Flow Packets/s": 106,
-      "Flow Bytes/s": 14050,
-      "FIN Flag Count": 12,
-      "RST Flag Count": 85
-    }
-  }
-];
-
 export function FlowInspector({ modelReady }: { modelReady: boolean }) {
-  const [flowJson, setFlowJson] = useState(JSON.stringify(PRESETS[0].flow, null, 2));
+  const [flowJson, setFlowJson] = useState("");
   const [result, setResult] = useState<FlowResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -217,57 +62,46 @@ export function FlowInspector({ modelReady }: { modelReady: boolean }) {
     }
   }
 
-  function loadPreset(preset: typeof PRESETS[number]) {
-    setFlowJson(JSON.stringify(preset.flow, null, 2));
-    setResult(null);
-    setError("");
-  }
+  const anomalyTelemetry = result?.anomaly_detection;
+  const anomalyEvidence = anomalyTelemetry?.evidence ?? [];
+  const threatTelemetry = result?.threat_detection;
+  const confidenceCalibrated = result?.model_provenance?.a1_confidence_calibrated === true;
 
-  // Parse flow features for the XAI Waterfall Chart
-  let parsedFlow: Record<string, number> = {};
-  try {
-    const raw = JSON.parse(flowJson);
-    if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-      parsedFlow = raw as Record<string, number>;
+  async function copyAnalysisSummary() {
+    if (!result) return;
+    let suppliedRecordId = "Not supplied";
+    let suppliedTimestamp = "Not supplied";
+    try {
+      const input = JSON.parse(flowJson);
+      suppliedRecordId = String(input.record_id ?? "Not supplied");
+      suppliedTimestamp = String(input.timestamp ?? input.Timestamp ?? "Not supplied");
+    } catch { /* The analysis request already validated JSON. */ }
+    const report = [
+      "# CyberSentinel single-flow analysis",
+      "Execution: offline A1–A3 model inference; no live capture or enforcement",
+      `Input record ID: ${suppliedRecordId}`,
+      `Input timestamp: ${suppliedTimestamp}`,
+      `Predicted class: ${result.final_class ?? "Unavailable"}`,
+      `A1 confidence: ${typeof threatTelemetry?.confidence === "number" ? threatTelemetry.confidence.toFixed(5) : "Unavailable"} (${confidenceCalibrated ? "held-out calibrated" : "uncalibrated; do not interpret as probability"})`,
+      `A2 anomaly index: ${typeof anomalyTelemetry?.anomaly_score === "number" ? anomalyTelemetry.anomaly_score.toFixed(5) : "Unavailable"} (not a probability)`,
+      `A2 flagged: ${anomalyTelemetry?.is_anomaly == null ? "Unknown" : String(anomalyTelemetry.is_anomaly)}`,
+      `A3 evidence status: ${result.evidence_status}`,
+      `A3 recommendation: ${result.action}`,
+      `Inference latency: ${result.latency_ms == null ? "Unavailable" : result.latency_ms.toFixed(2) + " ms"}`,
+      "",
+      "## Model rationale",
+      ...(result.rationale ?? []).map(item => `- ${item}`),
+      "",
+      "## Agent 2 observed deviations",
+      ...(anomalyEvidence.length ? anomalyEvidence.map(item => `- ${item.feature}: observed ${item.observed_value}; baseline q01 ${item.baseline_q01}; median ${item.baseline_median}; q99 ${item.baseline_q99}; ${item.interpretation}`) : ["- No structured deviation evidence returned."]),
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopiedReport(true);
+      window.setTimeout(() => setCopiedReport(false), 2500);
+    } catch {
+      setError("Clipboard access is unavailable in this browser.");
     }
-  } catch {
-    parsedFlow = {};
-  }
-
-  // Calculate relative feature contributions
-  const featureContributions = [
-    { name: "Flow Packets/s", val: parsedFlow["Flow Packets/s"] ?? 0, weight: (parsedFlow["Flow Packets/s"] ?? 0) > 1000 ? 88 : -40 },
-    { name: "Destination Port", val: parsedFlow["Destination Port"] ?? 0, weight: [22, 80, 445, 8088].includes(parsedFlow["Destination Port"] ?? 0) ? 65 : -55 },
-    { name: "Flow Bytes/s", val: parsedFlow["Flow Bytes/s"] ?? 0, weight: (parsedFlow["Flow Bytes/s"] ?? 0) > 100000 ? 75 : -35 },
-    { name: "SYN Flag Count", val: parsedFlow["SYN Flag Count"] ?? 0, weight: (parsedFlow["SYN Flag Count"] ?? 0) > 10 ? 82 : -50 },
-    { name: "Flow Duration", val: parsedFlow["Flow Duration"] ?? 0, weight: (parsedFlow["Flow Duration"] ?? 0) < 2000 ? 60 : -45 },
-  ];
-
-  const mitre = result?.final_class ? (MITRE_MAPPING[result.final_class] || MITRE_MAPPING.BENIGN) : null;
-
-  function copyIncidentReport() {
-    if (!result || !mitre) return;
-    const report = `# CYBERSENTINEL INCIDENT INVESTIGATION BRIEF
-Timestamp: ${new Date().toISOString()}
-Classification: ${result.final_class}
-Decision Action: ${result.action}
-Evidence Status: ${result.evidence_status}
-Inference Latency: ${result.latency_ms?.toFixed(2)} ms
-
-## MITRE ATT&CK Mapping
-- Tactic: ${mitre.tactic}
-- Technique: ${mitre.techniqueId} - ${mitre.techniqueName}
-- Severity: ${mitre.severity}
-
-## NIST SP 800-61r2 Response Guidance
-${mitre.nistGuidance.map(g => `- ${g}`).join("\n")}
-
-## Multi-Agent Fusion Rationale
-${result.rationale.map(r => `- ${r}`).join("\n")}
-`;
-    navigator.clipboard.writeText(report);
-    setCopiedReport(true);
-    setTimeout(() => setCopiedReport(false), 2500);
   }
 
   return (
@@ -276,40 +110,21 @@ ${result.rationale.map(r => `- ${r}`).join("\n")}
         <div>
           <div className="panel-kicker">
             <span className="pulse-dot" style={{ width: 6, height: 6 }} />
-            LOCAL MODEL INFERENCE & XAI SANDBOX
+            LOCAL MODEL INFERENCE · OBSERVED INPUT ONLY
           </div>
-          <h3>Single Flow Inspector & Threat Sandbox</h3>
-          <p>Analyze live or candidate network flows. Inspect Explainable AI (XAI) feature waterfalls and MITRE ATT&CK guidance.</p>
+          <h3>Single Flow Analysis</h3>
+          <p>Analyze one flow record supplied from an authorized source. This is offline inference, not live packet capture or network monitoring.</p>
         </div>
         <span className="panel-icon"><Network size={18} /></span>
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
-        <span style={{ fontSize: 11, color: "var(--muted)", alignSelf: "center", marginRight: 4, display: "flex", alignItems: "center", gap: 4 }}>
-          <Sparkles size={13} color="#38bdf8" /> Quick Attack Presets:
-        </span>
-        {PRESETS.map((p) => (
-          <button
-            key={p.name}
-            type="button"
-            onClick={() => loadPreset(p)}
-            className="secondary-btn"
-            style={{
-              fontSize: 11,
-              padding: "5px 10px",
-              cursor: "pointer",
-            }}
-          >
-            {p.name}
-          </button>
-        ))}
-      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", margin: "14px 0" }}>Paste one observed flow record as JSON. No sample incidents or synthetic attack presets are preloaded.</div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 16, marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
-            <span>FLOW 5-TUPLE & TELEMETRY JSON:</span>
-            <span>71 NUMERIC FEATURES</span>
+            <span>OBSERVED FLOW RECORD · JSON:</span>
+            <span>MODEL FEATURE SCHEMA + OPTIONAL OBSERVED ENDPOINT METADATA</span>
           </div>
           <textarea
             aria-label="Network flow JSON"
@@ -333,47 +148,51 @@ ${result.rationale.map(r => `- ${r}`).join("\n")}
           />
         </div>
 
-        {/* Explainable AI (XAI) Feature Waterfall */}
+        {/* Evidence is rendered only from the trained anomaly agent's returned payload. */}
         <div style={{ background: "rgba(12, 19, 35, 0.7)", padding: 14, borderRadius: 10, border: "1px solid var(--line)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <BarChart3 size={16} color="#38bdf8" />
-            <b style={{ fontSize: 12, letterSpacing: "0.5px" }}>Feature Contribution Waterfall (XAI)</b>
+            <b style={{ fontSize: 12, letterSpacing: "0.5px" }}>Agent 2 · Observed Deviation Evidence</b>
           </div>
-          <p style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 12px" }}>
-            Relative impact on classification: <span style={{ color: "#f43f5e" }}>Crimson</span> drives Threat classification; <span style={{ color: "#34d399" }}>Green</span> indicates Benign baseline conformance.
+          {!result && <p style={{ fontSize: 10, color: "var(--muted)" }}>Run inference to inspect the actual anomaly score and any deviations returned by the trained Agent 2 model.</p>}
+          {result && <div style={{ fontSize: 11, marginBottom: 10 }}>
+            <span style={{ color: "var(--muted)" }}>Anomaly index: </span>
+            <b>{anomalyTelemetry?.anomaly_score == null ? "Unavailable" : anomalyTelemetry.anomaly_score.toFixed(4)}</b>
+            <span style={{ color: "var(--muted)", marginLeft: 10 }}>Flagged: </span>
+            <b>{anomalyTelemetry?.is_anomaly == null ? "Unknown" : anomalyTelemetry.is_anomaly ? "Yes" : "No"}</b>
+          </div>}
+          {result && anomalyEvidence.length === 0 && <div className="empty-inline" style={{ fontSize: 10 }}>
+            {anomalyTelemetry?.status === "success" && anomalyTelemetry?.is_anomaly === false
+              ? "Agent 2 did not flag this flow; no deviation evidence was emitted."
+              : "No structured deviation evidence was returned by Agent 2."}
+          </div>}
+          {anomalyEvidence.length > 0 && <div style={{ display: "grid", gap: 10 }}>
+            {anomalyEvidence.map((item, index) => <div key={item.feature + index} style={{ padding: 10, borderRadius: 7, background: "var(--panel)", border: "1px solid var(--line)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                <b style={{ fontSize: 11 }}>{item.feature}</b>
+                <span className="tag">{item.evidence_code}</span>
+              </div>
+              <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.6 }}>
+                Observed: <b style={{ color: "var(--text)" }}>{Number(item.observed_value).toLocaleString()}</b>
+                {" · "}Training q01: {Number(item.baseline_q01).toLocaleString()}
+                {" · "}Median: {Number(item.baseline_median).toLocaleString()}
+                {" · "}q99: {Number(item.baseline_q99).toLocaleString()}
+              </div>
+              <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
+                Deviation: {Number(item.deviation_strength_iqr).toFixed(2)} IQR · {item.interpretation}
+              </div>
+            </div>)}
+          </div>}
+          <p style={{ fontSize: 9, color: "var(--muted)", margin: "12px 0 0" }}>
+            Statistical deviations are supporting evidence, not proof of malicious activity. No heuristic feature-impact scores are displayed.
           </p>
-
-          <div style={{ display: "grid", gap: 9 }}>
-            {featureContributions.map((fc) => {
-              const isThreatPull = fc.weight > 0;
-              const barWidth = Math.min(Math.abs(fc.weight), 100);
-              return (
-                <div key={fc.name} style={{ display: "grid", gridTemplateColumns: "110px 1fr 65px", gap: 8, alignItems: "center", fontSize: 10 }}>
-                  <span style={{ color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fc.name}</span>
-                  <div style={{ height: 6, background: "rgba(30, 41, 59, 0.6)", borderRadius: 4, overflow: "hidden", display: "flex" }}>
-                    <div
-                      style={{
-                        width: `${barWidth}%`,
-                        background: isThreatPull ? "linear-gradient(90deg, #f43f5e, #fb7185)" : "linear-gradient(90deg, #10b981, #34d399)",
-                        borderRadius: 4,
-                        boxShadow: isThreatPull ? "0 0 8px rgba(244, 63, 94, 0.5)" : "0 0 8px rgba(52, 211, 153, 0.5)"
-                      }}
-                    />
-                  </div>
-                  <b style={{ fontFamily: "'DM Mono', monospace", textAlign: "right", color: isThreatPull ? "#f43f5e" : "#34d399" }}>
-                    {fc.val.toLocaleString()}
-                  </b>
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
 
       <div className="panel-foot">
         <span><LockKeyhole size={13} /> Offline replay only · Simulated mitigation boundaries</span>
         <button className="primary-btn" disabled={!modelReady || busy} onClick={analyze}>
-          {busy ? "Executing Five-Agent Inference…" : "Analyze Flow"} <ArrowRight size={14} />
+          {busy ? "Running A1–A3 model inference…" : "Analyze observed flow"} <ArrowRight size={14} />
         </button>
       </div>
 
@@ -385,7 +204,7 @@ ${result.rationale.map(r => `- ${r}`).join("\n")}
 
       {error && <div className="parse-warning" role="alert" style={{ marginTop: 12 }}>{error}</div>}
 
-      {/* Analysis Results & MITRE ATT&CK Incident Brief */}
+      {/* Analysis results derived only from model outputs */}
       {result && (
         <div className="dataset-loaded" style={{ marginTop: 18, borderTop: "1px solid var(--line)", paddingTop: 16 }}>
           <div className="dataset-facts" style={{ margin: "0 0 16px 0" }}>
@@ -396,7 +215,7 @@ ${result.rationale.map(r => `- ${r}`).join("\n")}
               </b>
             </div>
             <div>
-              <small>SIMULATED ACTION</small>
+              <small>A3 RECOMMENDATION</small>
               <b style={{ color: result.action === "BLOCK" ? "#f43f5e" : "#34d399" }}>
                 {result.action}
               </b>
@@ -411,42 +230,23 @@ ${result.rationale.map(r => `- ${r}`).join("\n")}
             </div>
           </div>
 
-          {/* MITRE ATT&CK & Incident Brief Card */}
-          {mitre && (
-            <div style={{ background: "rgba(15, 23, 42, 0.75)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: 10, padding: 16, marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <ShieldAlert size={18} color={mitre.severity === "CRITICAL" ? "#f43f5e" : mitre.severity === "HIGH" ? "#fbbf24" : "#38bdf8"} />
-                  <b style={{ fontSize: 13 }}>MITRE ATT&CK™ Alignment & Incident Response Plan</b>
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span className={"tag " + (mitre.severity === "CRITICAL" ? "tag-red" : mitre.severity === "HIGH" ? "tag-amber" : "tag-green")}>
-                    SEVERITY: {mitre.severity}
-                  </span>
-                  <button onClick={copyIncidentReport} className="secondary-btn" style={{ padding: "4px 8px", fontSize: 10 }}>
-                    {copiedReport ? <><Check size={12} color="#34d399" /> Copied!</> : <><Copy size={12} /> Copy Incident Brief</>}
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 12, background: "rgba(9, 14, 26, 0.6)", padding: 10, borderRadius: 8 }}>
-                <div><small style={{ color: "var(--muted)", fontSize: 9 }}>MITRE TACTIC</small><div style={{ fontWeight: 600, fontSize: 11, color: "#f1f5f9" }}>{mitre.tactic}</div></div>
-                <div><small style={{ color: "var(--muted)", fontSize: 9 }}>TECHNIQUE ID</small><div style={{ fontWeight: 700, fontFamily: "'DM Mono', monospace", color: "#38bdf8" }}>{mitre.techniqueId}</div></div>
-                <div><small style={{ color: "var(--muted)", fontSize: 9 }}>TECHNIQUE NAME</small><div style={{ fontWeight: 600, fontSize: 11, color: "#f1f5f9" }}>{mitre.techniqueName}</div></div>
-              </div>
-
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
-                <b>NIST SP 800-61r2 Recommended Remediation Checklist:</b>
-              </div>
-              <ul style={{ margin: 0, paddingLeft: 20, fontSize: 11, color: "var(--text)", lineHeight: 1.6 }}>
-                {mitre.nistGuidance.map((item, idx) => (
-                  <li key={idx}>{item}</li>
-                ))}
-              </ul>
+          <div style={{ background: "rgba(15, 23, 42, 0.75)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <b style={{ fontSize: 13 }}>Model output provenance</b>
+              <button onClick={copyAnalysisSummary} className="secondary-btn" style={{ padding: "4px 8px", fontSize: 10 }}>
+                {copiedReport ? <><Check size={12} color="#34d399" /> Copied</> : <><Copy size={12} /> Copy analysis summary</>}
+              </button>
             </div>
-          )}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 10, marginTop: 12 }}>
+              <div><small style={{ color: "var(--muted)", fontSize: 9 }}>A1 CLASSIFIER CONFIDENCE</small><div style={{ fontWeight: 700 }}>{typeof threatTelemetry?.confidence === "number" ? threatTelemetry.confidence.toFixed(4) : "Unavailable"}</div><small style={{ color: "var(--muted)" }}>{confidenceCalibrated ? "Calibrated on a separate held-out set" : "Uncalibrated; not a probability"}</small></div>
+              <div><small style={{ color: "var(--muted)", fontSize: 9 }}>A2 ANOMALY INDEX</small><div style={{ fontWeight: 700 }}>{typeof anomalyTelemetry?.anomaly_score === "number" ? anomalyTelemetry.anomaly_score.toFixed(4) : "Unavailable"}</div><small style={{ color: "var(--muted)" }}>Bounded index; not a probability</small></div>
+            </div>
+            <p style={{ fontSize: 10, color: "var(--muted)", margin: "12px 0 0", lineHeight: 1.6 }}>
+              ATT&CK techniques are not inferred from a five-class flow label. Verify the underlying evidence and environment before assigning an adversary technique or taking response action.
+            </p>
+          </div>
 
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Five-Agent Fusion Rationale:</div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>A3 Fusion Rationale:</div>
           <ul style={{ margin: "0 0 14px 0", paddingLeft: 18, color: "var(--text)", fontSize: 11, lineHeight: 1.7 }}>
             {(result.rationale ?? []).map((line, index) => <li key={index}>{line}</li>)}
           </ul>
@@ -505,13 +305,13 @@ export function AgentReadiness({ health }: { health: { model_ready: boolean; age
 type AnomalyResult = {
   anomaly_score: number | null;
   is_anomaly: boolean | null;
-  evidence: string[];
+  evidence: (string | Record<string, unknown>)[];
   status: string;
   message?: string | null;
 };
 
 export function Agent2Console({ ready }: { ready: boolean }) {
-  const [flowJson, setFlowJson] = useState("{}");
+  const [flowJson, setFlowJson] = useState("");
   const [result, setResult] = useState<AnomalyResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -561,7 +361,7 @@ export function Agent2Console({ ready }: { ready: boolean }) {
         value={flowJson}
         onChange={event => setFlowJson(event.target.value)}
         spellCheck={false}
-        placeholder='{"Flow Duration": 1200, "Flow Packets/s": 15}'
+        placeholder='Paste one captured flow JSON object using the trained model feature names.'
         style={{
           width: "100%",
           minHeight: 170,
@@ -587,17 +387,17 @@ export function Agent2Console({ ready }: { ready: boolean }) {
       {result && (
         <div className="dataset-loaded" style={{ marginTop: 18 }}>
           <div className="dataset-facts">
-            <div><small>ANOMALY RESULT</small><b>{result.is_anomaly ? "Anomaly Flagged" : "Baseline-like"}</b></div>
-            <div><small>RAW SCORE</small><b>{result.anomaly_score == null ? "—" : result.anomaly_score.toFixed(5)}</b></div>
+            <div><small>ANOMALY RESULT</small><b>{result.is_anomaly == null ? "Unknown" : result.is_anomaly ? "Anomaly Flagged" : "Baseline-like"}</b></div>
+            <div><small>ANOMALY INDEX · NOT A PROBABILITY</small><b>{result.anomaly_score == null ? "—" : result.anomaly_score.toFixed(5)}</b></div>
             <div><small>STATUS</small><b>{result.status}</b></div>
           </div>
           <b>Feature evidence</b>
           {result.evidence.length ? (
-            <ul>{result.evidence.map((item, index) => <li key={index}>{item.replaceAll("_", " ")}</li>)}</ul>
+            <ul>{result.evidence.map((item, index) => <li key={index}>{typeof item === "string" ? item.replaceAll("_", " ") : JSON.stringify(item)}</li>)}</ul>
           ) : (
             <div className="empty-inline">No out-of-range feature evidence was returned for this flow.</div>
           )}
-          <small className="muted">The anomaly score is interpreted against Agent 2's learned decision threshold; it is not a calibrated probability.</small>
+          <small className="muted">The 0–1 anomaly index is higher for more anomalous traffic; it is a bounded score, not a probability. Agent 2 applies its learned threshold to the underlying Isolation Forest decision function.</small>
         </div>
       )}
     </section>

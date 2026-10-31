@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+import io
+import os
 import sys
+import tempfile
 import time
+import zipfile
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -23,6 +27,7 @@ from cybersentinel.agents.correlation import TemporalCorrelationAgent
 from cybersentinel.agents.adaptive_defense import AdaptiveDefenseAgent
 from cybersentinel.replay import ReplayEngine
 from cybersentinel.replay.submission import SubmissionValidator
+from cybersentinel.replay.input_validation import validate_replay_input
 from cybersentinel.storage.history_db import list_runs, record_run
 import threading
 import pandas as pd
@@ -43,6 +48,7 @@ _anomaly_agent: AnomalyDetectionAgent | None = None
 _correlation_agent = TemporalCorrelationAgent()
 _defense_agent = AdaptiveDefenseAgent()
 _LAST_CORRELATION_GROUPS: list[dict[str, Any]] = []
+SERVERLESS_RUNTIME = os.environ.get("VERCEL") == "1"
 
 
 class BatchAnalyzeRequest(BaseModel):
@@ -82,20 +88,22 @@ def health():
         "mode": "offline-replay",
         "model_ready": pipeline is not None,
         "agents": {
-            "agent_1_threat_detection": threat_present,
-            "agent_2_anomaly_detection": anomaly_present,
-            "agent_3_evidence_fusion": True,
-            "agent_4_temporal_correlation": True,
-            "agent_5_adaptive_defense": True,
+            "agent_1_threat_detection": pipeline is not None and threat_present,
+            "agent_2_anomaly_detection": pipeline is not None and anomaly_present,
+            "agent_3_evidence_fusion": pipeline is not None,
+            "agent_4_temporal_correlation": pipeline is not None,
+            "agent_5_adaptive_defense": pipeline is not None,
         },
-        "message": "All 5 multi-agent components operational." if pipeline else "Model artifacts are missing or failed validation.",
+        "readiness": "ready" if pipeline is not None else "not_ready",
+        "message": "Both model artifacts loaded; offline inference is ready." if pipeline else "API process is available, but verified model artifacts are missing or failed validation.",
     }
 
 
 @app.get("/api/system/diagnostics")
 def system_diagnostics():
     """Expose actual local artifact presence without inventing readiness."""
-    dataset = BASE_DIR / "data" / "processed" / "eval_prepared.parquet"
+    dataset_candidates = (BASE_DIR / "data" / "processed" / "hidden_replay_input.csv", BASE_DIR / "data" / "processed" / "hidden_replay_input.parquet")
+    dataset = next((path for path in dataset_candidates if path.is_file()), dataset_candidates[-1])
     history_db = BASE_DIR / "data" / "cybersentinel_history.db"
     submission = BASE_DIR / "outputs" / "submission"
     model_status = {
@@ -106,28 +114,36 @@ def system_diagnostics():
         "agent_5_defense_code": True,
     }
     files = {}
-    for filename in ("classification.csv", "policy.csv", "replay.csv"):
+    for filename in ("classification.csv", "policies.csv", "replay.csv"):
         path = submission / filename
         files[filename] = {
             "present": path.is_file(),
             "bytes": path.stat().st_size if path.is_file() else None,
         }
+    input_validation = None
+    if dataset.is_file():
+        try:
+            input_frame = pd.read_parquet(dataset) if dataset.suffix == ".parquet" else pd.read_csv(dataset)
+            input_validation = validate_replay_input(input_frame)
+        except Exception as exc:
+            input_validation = {"valid": False, "errors": [f"Input validation could not run: {type(exc).__name__}"]}
     return {
-        "api": {"available": True, "mode": "offline-replay"},
+        "api": {"available": True, "mode": "offline-replay", "runtime": "serverless-preview" if SERVERLESS_RUNTIME else "local"},
         "models": model_status,
         "model_sizes": {
             "agent_1_bytes": THREAT_MODEL.stat().st_size if THREAT_MODEL.is_file() else None,
             "agent_2_bytes": ANOMALY_MODEL.stat().st_size if ANOMALY_MODEL.is_file() else None,
         },
         "models_ready": get_pipeline() is not None,
-        "evaluation_dataset": {
+        "hidden_replay_input": {
             "present": dataset.is_file(),
             "bytes": dataset.stat().st_size if dataset.is_file() else None,
-            "path": "data/processed/eval_prepared.parquet",
+            "path": str(dataset.relative_to(BASE_DIR)) if dataset.is_file() else "data/processed/hidden_replay_input.csv",
+            "validation": input_validation,
         },
         "submission_artifacts": files,
-        "history_database": {"present": history_db.is_file()},
-        "source_identity": "native source IP when present; otherwise TCP-stack-derived synthetic identity; unavailable identity fails closed",
+        "history_database": {"present": history_db.is_file(), "persistent": not SERVERLESS_RUNTIME, "mode": "ephemeral" if SERVERLESS_RUNTIME else "local_sqlite"},
+        "source_identity": "literal observed source IP only; missing or invalid endpoint values remain unknown and never become synthetic identities",
         "firewall": {"mode": "simulated-only", "host_firewall_modified": False},
     }
 
@@ -135,6 +151,8 @@ def system_diagnostics():
 @app.get("/api/history")
 def get_history(limit: int = 15):
     """Retrieve runs from local SQLite database."""
+    if SERVERLESS_RUNTIME:
+        return {"runs": [], "source": "not_persistent_serverless", "message": "Run history is local-only and is not persisted by serverless preview deployments."}
     try:
         runs = list_runs(limit=limit)
         normalized = [
@@ -156,9 +174,9 @@ def models_status():
             "agents": {
                 "threat_detection": {"artifact_present": THREAT_MODEL.is_file()},
                 "anomaly_detection": {"artifact_present": ANOMALY_MODEL.is_file()},
-                "evidence_fusion": {"ready": True},
-                "temporal_correlation": {"ready": True},
-                "adaptive_defense": {"ready": True},
+                "evidence_fusion": {"code_available": True, "runtime_ready": False},
+                "temporal_correlation": {"code_available": True, "runtime_ready": False},
+                "adaptive_defense": {"code_available": True, "runtime_ready": False},
             },
         }
     return {
@@ -168,14 +186,19 @@ def models_status():
             "threat_detection": {
                 "backend": pipeline.threat_agent.model.metadata.get("backend"),
                 "feature_count": len(pipeline.threat_agent.model.feature_columns),
+                "feature_columns": list(pipeline.threat_agent.model.feature_columns),
                 "training_rows": pipeline.threat_agent.model.metadata.get("training_rows"),
+                "confidence_calibrated": bool(pipeline.threat_agent.model.metadata.get("confidence_calibrated", False)),
+                "calibration_temperature": pipeline.threat_agent.model.calibration_temperature,
                 "classes": list(pipeline.threat_agent.model.label_encoder.classes_),
             },
             "anomaly_detection": {
                 "algorithm": "IsolationForest",
                 "feature_count": len(pipeline.anomaly_agent.feature_columns),
+                "feature_columns": list(pipeline.anomaly_agent.feature_columns),
                 "training_rows": pipeline.anomaly_agent.metadata.get("training_rows"),
                 "threshold": pipeline.anomaly_agent.threshold,
+                "score_is_probability": False,
             },
             "evidence_fusion": {"simulated_actions": ["ALLOW", "BLOCK", "REVIEW"]},
             "temporal_correlation": {"window_size": _correlation_agent.window_size},
@@ -223,46 +246,16 @@ def analyze(payload: dict[str, Any]):
     if not isinstance(flow, dict) or not flow:
         raise HTTPException(status_code=422, detail="Provide a non-empty flow object.")
 
-    # Run Tri-Agent pipeline
+    # This endpoint is deliberately stateless: A4/A5 require chronological
+    # sequence state and are run only by /api/replay/simulate or /api/replay/run-official.
     analysis = pipeline.analyze(flow)
-
-    with _state_lock:
-        # Correlate with Agent 4
-        correlation = _correlation_agent.correlate(
-            record_id=flow.get("record_id", "live-flow"),
-            flow=flow,
-            threat_class=analysis.get("final_class"),
-            confidence=analysis.get("confidence"),
-        )
-
-        # Evaluate with Agent 5
-        src_ip, _, _ = TemporalCorrelationAgent.extract_endpoints(flow)
-        is_attack = analysis.get("action") == "BLOCK" or (correlation.correlated and correlation.attack_type != "BENIGN")
-        defense = _defense_agent.handle_post_analysis(
-            record_id=flow.get("record_id", "live-flow"),
-            source_ip=src_ip,
-            current_step=len(_correlation_agent.history),
-            attack_detected=is_attack,
-            attack_type=correlation.attack_type or analysis.get("final_class"),
-            confidence=analysis.get("confidence"),
-        )
-
-    analysis["temporal_correlation"] = {
-        "correlated": correlation.correlated,
-        "group_id": correlation.group_id,
-        "attack_type": correlation.attack_type,
-        "evidence": correlation.evidence,
-    }
-    analysis["adaptive_defense"] = {
-        "action": defense.action,
-        "applied_policy_id": defense.applied_policy_id,
-        "new_policy": {
-            "policy_id": defense.new_policy_created.policy_id,
-            "scope_type": defense.new_policy_created.scope_type,
-            "scope_value": defense.new_policy_created.scope_value,
-            "expires_after_record_id": defense.new_policy_created.expires_after_record_id,
-        } if defense.new_policy_created else None,
-        "rationale": defense.rationale,
+    analysis["execution_mode"] = "single_record_model_inference"
+    analysis["stateful_agents"] = "not_run; use chronological replay for A4/A5"
+    threat_model = getattr(pipeline.threat_agent, "model", None)
+    threat_metadata = getattr(threat_model, "metadata", {}) or {}
+    analysis["model_provenance"] = {
+        "a1_confidence_calibrated": bool(threat_metadata.get("confidence_calibrated", False)),
+        "a2_score_is_probability": False,
     }
     return analysis
 
@@ -319,6 +312,17 @@ def simulate_replay(payload: ReplaySimulationRequest):
         fusion_agent=pipeline.fusion_agent,
     )
     df = pd.DataFrame(payload.flows)
+    threat_model = getattr(engine.threat_agent, "model", None)
+    threat_features = getattr(threat_model, "feature_columns", None)
+    anomaly_features = getattr(engine.anomaly_agent, "feature_columns", None)
+    feature_contracts = {}
+    if threat_features:
+        feature_contracts["Agent 1"] = list(threat_features)
+    if anomaly_features:
+        feature_contracts["Agent 2"] = list(anomaly_features)
+    input_report = validate_replay_input(df, feature_contracts or None)
+    if not input_report["valid"]:
+        raise HTTPException(status_code=422, detail={"code": "REPLAY_INPUT_INVALID", "report": input_report})
     results = engine.run_replay(df)
 
     # Retain only groups produced by this replay run.
@@ -367,48 +371,43 @@ def simulate_replay(payload: ReplaySimulationRequest):
 @app.post("/api/replay/run-official")
 def run_official_replay():
     """Run the installed official evaluation stream and write the three submission CSVs."""
+    if SERVERLESS_RUNTIME:
+        raise HTTPException(status_code=503, detail={"code": "LOCAL_RUNTIME_REQUIRED", "message": "Replay execution and local SQLite history require the local Python runtime; serverless previews are read-only."})
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
             status_code=503,
             detail={"code": "MODEL_NOT_READY", "message": "Install and verify both model artifacts before running replay."},
         )
-    eval_file = BASE_DIR / "data" / "processed" / "eval_prepared.parquet"
-    if not eval_file.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "EVALUATION_DATASET_NOT_FOUND", "message": "Install the organiser-provided evaluation parquet at data/processed/eval_prepared.parquet."},
-        )
+    candidates = (BASE_DIR / "data" / "processed" / "hidden_replay_input.csv", BASE_DIR / "data" / "processed" / "hidden_replay_input.parquet")
+    eval_file = next((path for path in candidates if path.is_file()), None)
+    if eval_file is None:
+        raise HTTPException(status_code=404, detail={"code": "HIDDEN_REPLAY_INPUT_NOT_FOUND", "message": "Install the unlabelled organizer input as hidden_replay_input.parquet or .csv."})
     try:
-        frame = pd.read_parquet(eval_file)
+        frame = pd.read_parquet(eval_file) if eval_file.suffix == ".parquet" else pd.read_csv(eval_file)
         if frame.empty:
-            raise HTTPException(status_code=422, detail="The evaluation dataset is empty.")
+            raise HTTPException(status_code=422, detail="The unlabelled hidden replay input is empty.")
         engine = ReplayEngine(
             threat_agent=pipeline.threat_agent,
             anomaly_agent=pipeline.anomaly_agent,
             fusion_agent=pipeline.fusion_agent,
         )
+        input_report = validate_replay_input(frame, {
+            "Agent 1": engine.threat_agent.model.feature_columns,
+            "Agent 2": engine.anomaly_agent.feature_columns,
+        })
+        if not input_report["valid"]:
+            raise HTTPException(status_code=422, detail={"code": "REPLAY_INPUT_INVALID", "report": input_report})
         results = engine.run_replay(frame)
         output_dir = BASE_DIR / "outputs" / "submission"
         output_dir.mkdir(parents=True, exist_ok=True)
-        files = {
-            "classification.csv": engine.export_csv(
-                results["classification_rows"],
-                ["record_id", "predicted_class", "anomaly score", "evidence status"],
-            ),
-            "policy.csv": engine.export_csv(
-                results["policy_rows"],
-                ["policy_id", "activated_after_record_id", "scope_type", "scope_value", "expires_after_record_id", "policy_action"],
-            ),
-            "replay.csv": engine.export_csv(
-                results["replay_rows"],
-                ["record_id", "action", "applied_policy_id"],
-            ),
-        }
-        for filename, csv_text in files.items():
-            (output_dir / filename).write_text(csv_text, encoding="utf-8", newline="")
-        record_ids = [str(row["record_id"]) for row in results["classification_rows"]]
-        validation = SubmissionValidator.validate_submission_bundle(output_dir, record_ids)
+        generated_files = engine.write_submission_files(results, output_dir)
+        # Validate against the original organiser input, never against the output
+        # being validated (which could be truncated and otherwise validate itself).
+        if "record_id" not in frame.columns:
+            raise HTTPException(status_code=422, detail="The hidden replay input must contain organizer-provided record_id values.")
+        record_ids = frame["record_id"].astype(str).tolist()
+        validation = SubmissionValidator.validate_submission_bundle(output_dir, record_ids, source_frame=frame)
 
         global _LAST_CORRELATION_GROUPS
         _LAST_CORRELATION_GROUPS = [
@@ -441,16 +440,41 @@ def run_official_replay():
             elapsed_seconds=metrics["elapsed_seconds"],
             status="COMPLETED" if validation.get("all_valid") else "VALIDATION_FAILED",
         )
+        summary = {
+            "run_id": run_id,
+            "source": "installed_unlabelled_hidden_replay_input",
+            "records_processed": int(metrics["total_records"]),
+            "artifacts": {
+                "classification_rows": len(results["classification_rows"]),
+                "replay_rows": len(results["replay_rows"]),
+                "policy_rows": len(results["policy_rows"]),
+            },
+            "operational_metrics": {
+                "blocked_records": int(metrics["blocked_records"]),
+                "allowed_records": int(metrics["allowed_records"]),
+                "policies_created": int(metrics["policies_created"]),
+                "elapsed_seconds": float(metrics["elapsed_seconds"]),
+                "throughput_records_per_second": float(metrics["throughput_fps"]),
+            },
+            "ground_truth_metrics": None,
+            "validation": {
+                "all_valid": bool(validation.get("all_valid")),
+                "status": validation.get("status"),
+                "organizer_acceptance": "NOT_VERIFIED",
+            },
+            "disclosure": "The hidden input is unlabelled. Attack/benign performance metrics and organizer acceptance cannot be inferred from this local replay.",
+        }
+        (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return {
             "run_id": run_id,
             "metrics": metrics,
             "validation": validation,
             "files": {name: {"path": f"outputs/submission/{name}", "rows": len(results[key])}
                       for name, key in (("classification.csv", "classification_rows"),
-                                        ("policy.csv", "policy_rows"),
+                                        ("policies.csv", "policy_rows"),
                                         ("replay.csv", "replay_rows"))},
             "correlation_groups": len(_LAST_CORRELATION_GROUPS),
-            "source": "installed_official_evaluation_dataset",
+            "source": "installed_unlabelled_hidden_replay_input",
         }
     except HTTPException:
         raise
@@ -459,6 +483,75 @@ def run_official_replay():
             status_code=500,
             detail={"code": "OFFICIAL_REPLAY_FAILED", "type": type(exc).__name__, "message": "Official replay failed; inspect backend logs for details."},
         ) from exc
+
+
+@app.post("/api/replay/input/upload")
+async def upload_replay_input(file: UploadFile = File(...)):
+    """Install a real organizer CSV or the known cyber-hidden.zip without extracting paths."""
+    if SERVERLESS_RUNTIME:
+        raise HTTPException(status_code=503, detail={
+            "code": "LOCAL_RUNTIME_REQUIRED",
+            "message": "Replay input files are stored locally. Use the local Python API, not a serverless preview.",
+        })
+    filename = (file.filename or "").casefold()
+    try:
+        payload = await file.read(20 * 1024 * 1024 + 1)
+    finally:
+        await file.close()
+    if len(payload) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Upload exceeds the 20 MiB compressed-file limit.")
+
+    if filename.endswith(".csv"):
+        csv_payload = payload
+    elif filename.endswith(".zip"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                try:
+                    entry = archive.getinfo("Cyber/hidden/records.csv")
+                except KeyError as exc:
+                    raise HTTPException(status_code=422, detail={
+                        "code": "HIDDEN_CSV_NOT_FOUND",
+                        "message": "ZIP must contain the organizer file Cyber/hidden/records.csv.",
+                    }) from exc
+                if entry.file_size > 50 * 1024 * 1024 or entry.is_dir():
+                    raise HTTPException(status_code=413, detail="Uncompressed replay CSV exceeds the 50 MiB limit.")
+                if entry.compress_size and entry.file_size / entry.compress_size > 1000:
+                    raise HTTPException(status_code=413, detail="ZIP compression ratio exceeds the safety limit.")
+                csv_payload = archive.read(entry)
+        except zipfile.BadZipFile as exc:
+            raise HTTPException(status_code=422, detail="Uploaded ZIP archive is invalid.") from exc
+    else:
+        raise HTTPException(status_code=415, detail="Upload an organizer .csv file or cyber-hidden.zip.")
+
+    try:
+        frame = pd.read_csv(io.BytesIO(csv_payload), dtype={"record_id": str}, keep_default_na=False)
+        report = validate_replay_input(frame)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": "REPLAY_INPUT_PARSE_FAILED",
+            "message": f"Replay input could not be parsed: {type(exc).__name__}.",
+        }) from exc
+    if not report["valid"]:
+        raise HTTPException(status_code=422, detail={"code": "REPLAY_INPUT_INVALID", "report": report})
+
+    destination = BASE_DIR / "data" / "processed" / "hidden_replay_input.csv"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".hidden-replay-", suffix=".csv", dir=destination.parent, delete=False) as handle:
+            handle.write(csv_payload)
+            temporary_path = Path(handle.name)
+        os.replace(temporary_path, destination)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+    return {
+        "installed": True,
+        "path": "data/processed/hidden_replay_input.csv",
+        "input_validation": report,
+        "message": "Organizer input installed locally. No endpoints or timestamps were generated or imputed.",
+    }
 
 
 @app.get("/api/replay/validate")
@@ -471,89 +564,72 @@ def validate_submissions():
             "status": "NOT_GENERATED",
             "message": "Submission files have not yet been generated in outputs/submission/.",
         }
-    # Read record ids from classification.csv
-    import csv
-    with (sub_dir / "classification.csv").open("r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        records = [r["record_id"] for r in reader]
 
-    report = SubmissionValidator.validate_submission_bundle(sub_dir, records)
-    return report
+    # The source dataset is the authority for coverage and ordering. Never infer
+    # expected IDs from classification.csv, because a truncated file could then
+    # incorrectly validate against its own contents.
+    candidates = (BASE_DIR / "data" / "processed" / "hidden_replay_input.csv", BASE_DIR / "data" / "processed" / "hidden_replay_input.parquet")
+    eval_file = next((path for path in candidates if path.is_file()), None)
+    if eval_file is None:
+        return {"valid": False, "status": "INPUT_DATASET_NOT_AVAILABLE", "message": "Cannot verify submission coverage without the original unlabelled hidden replay input."}
+    try:
+        source = pd.read_parquet(eval_file) if eval_file.suffix == ".parquet" else pd.read_csv(eval_file)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "EVALUATION_DATASET_READ_FAILED", "type": type(exc).__name__},
+        ) from exc
+    if "record_id" not in source.columns:
+        raise HTTPException(
+            status_code=422,
+            detail="The evaluation dataset must contain organiser-provided record_id values.",
+        )
+    records = source["record_id"].astype(str).tolist()
+    if len(records) != len(set(records)):
+        raise HTTPException(status_code=422, detail="The evaluation dataset contains duplicate record_id values.")
+
+    return SubmissionValidator.validate_submission_bundle(sub_dir, records, source_frame=source)
 
 
 @app.get("/api/overview")
 def get_overview():
-    """Compute SOC KPIs from actual replay artifacts; labels are evaluation-only."""
-    import csv
-
-    eval_file = BASE_DIR / "data" / "processed" / "eval_prepared.parquet"
+    """Return operational replay counts without inventing hidden-set ground-truth metrics."""
     sub_dir = BASE_DIR / "outputs" / "submission"
-    class_file = sub_dir / "classification.csv"
     replay_file = sub_dir / "replay.csv"
-    policy_file = sub_dir / "policy.csv"
-    required = (eval_file, class_file, replay_file, policy_file)
-    missing = [str(path.relative_to(BASE_DIR)) for path in required if not path.is_file()]
+    policies_file = sub_dir / "policies.csv"
+    classification_file = sub_dir / "classification.csv"
+    missing = [str(path.name) for path in (replay_file, policies_file, classification_file) if not path.is_file()]
     if missing:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "OVERVIEW_ARTIFACTS_NOT_READY", "missing": missing,
-                    "message": "Overview metrics are unavailable until the evaluation dataset and replay artifacts are installed."},
-        )
+        raise HTTPException(status_code=503, detail={"code": "REPLAY_ARTIFACTS_NOT_READY", "missing": missing})
     try:
-        flows = pd.read_parquet(eval_file)
-        classifications = pd.read_csv(class_file, dtype={"record_id": str})
-        replay = pd.read_csv(replay_file, dtype={"record_id": str, "applied_policy_id": str})
-        policies = pd.read_csv(policy_file)
+        replay = pd.read_csv(replay_file, dtype=str, keep_default_na=False)
+        policies = pd.read_csv(policies_file, dtype=str, keep_default_na=False)
+        classifications = pd.read_csv(classification_file, dtype=str, keep_default_na=False)
     except Exception as exc:
         raise HTTPException(status_code=503, detail={"code": "OVERVIEW_READ_FAILED", "type": type(exc).__name__}) from exc
-
-    if "label" not in flows.columns:
-        raise HTTPException(status_code=503, detail="Evaluation labels are required only for offline metric calculation.")
-    flow_ids = [str(value) for value in flows["record_id"].tolist()] if "record_id" in flows.columns else [str(value) for value in flows.index]
-    if len(set(flow_ids)) != len(flow_ids):
-        raise HTTPException(status_code=503, detail="Evaluation record IDs are not unique.")
-    if classifications["record_id"].astype(str).duplicated().any() or replay["record_id"].astype(str).duplicated().any():
-        raise HTTPException(status_code=503, detail="Submission artifacts contain duplicate record IDs.")
-
-    class_ids = set(classifications["record_id"].astype(str))
-    replay_ids = set(replay["record_id"].astype(str))
-    expected_ids = set(flow_ids)
-    if class_ids != expected_ids or replay_ids != expected_ids:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "OVERVIEW_RECORD_MISMATCH", "expected": len(expected_ids),
-                    "classification": len(class_ids), "replay": len(replay_ids)},
-        )
-
-    truth = dict(zip(flow_ids, flows["label"].astype(str).str.upper().tolist()))
-    actions = dict(zip(replay["record_id"].astype(str), replay["action"].astype(str).str.upper()))
-    total = len(flow_ids)
-    blocked = sum(action == "BLOCK" for action in actions.values())
-    allowed = sum(action == "ALLOW" for action in actions.values())
-    attacks = sum(label != "BENIGN" for label in truth.values())
-    benign = total - attacks
-    attack_blocks = sum(actions[rid] == "BLOCK" and truth[rid] != "BENIGN" for rid in flow_ids)
-    false_blocks = sum(actions[rid] == "BLOCK" and truth[rid] == "BENIGN" for rid in flow_ids)
-    benign_preserved = sum(actions[rid] == "ALLOW" and truth[rid] == "BENIGN" for rid in flow_ids)
-    attack_misses = attacks - attack_blocks
-
+    if not {"record_id", "action", "active_policy_id"}.issubset(replay.columns):
+        raise HTTPException(status_code=503, detail="Replay CSV does not match the official organizer schema.")
+    actions = replay["action"].str.upper()
+    total = len(replay)
+    blocked = int((actions == "BLOCK").sum())
+    allowed = int((actions == "ALLOW").sum())
     return {
-        "source": "local_evaluation_dataset_and_generated_submission_csvs",
-        "labels_used_for": "offline_metric_calculation_only",
+        "source": "unlabelled_hidden_replay_submission_artifacts",
+        "labels_used_for": "none",
         "metrics": {
             "total_records": total, "blocked_records": blocked, "allowed_records": allowed,
-            "policies_created": int(len(policies)), "attack_records": attacks, "benign_records": benign,
-            "attacks_contained": attack_blocks, "attacks_allowed": attack_misses,
-            "false_blocks": false_blocks, "benign_preserved": benign_preserved,
-            "attack_containment_rate": round(100 * attack_blocks / max(1, attacks), 2),
-            "benign_preservation_rate": round(100 * benign_preserved / max(1, benign), 2),
-            "block_precision": round(100 * attack_blocks / max(1, blocked), 2),
+            "policies_created": len(policies), "attack_records": None, "benign_records": None,
+            "attacks_contained": None, "attacks_allowed": None, "false_blocks": None,
+            "benign_preserved": None, "attack_containment_rate": None,
+            "benign_preservation_rate": None, "block_precision": None,
         },
         "integrity": {
             "classification_rows": len(classifications), "replay_rows": len(replay),
-            "policy_rows": len(policies), "record_ids_match": True,
+            "policy_rows": len(policies),
+            "record_ids_match": classifications["record_id"].astype(str).tolist() == replay["record_id"].astype(str).tolist(),
             "action_conservation": total == blocked + allowed,
         },
+        "disclosure": "Hidden records are unlabelled. Attack/benign performance metrics are intentionally unavailable and must not be inferred from model predictions.",
     }
 
 
@@ -588,7 +664,7 @@ def get_benchmarks():
 @app.get("/api/submissions/download/{filename}")
 def download_submission_file(filename: str):
     """Download an official submission CSV or report."""
-    allowed = {"classification.csv", "policy.csv", "replay.csv", "summary.json", "validation_report.json"}
+    allowed = {"classification.csv", "policies.csv", "replay.csv", "summary.json", "validation_report.json"}
     if filename not in allowed:
         raise HTTPException(status_code=400, detail=f"Invalid file requested: {filename}")
 
@@ -607,11 +683,12 @@ def get_flows_sample(limit: int = 50, offset: int = 0, class_filter: str | None 
         raise HTTPException(status_code=422, detail="limit must be 1..200 and offset must be non-negative.")
 
     sub_dir = BASE_DIR / "outputs" / "submission"
-    eval_file = BASE_DIR / "data" / "processed" / "eval_prepared.parquet"
+    candidates = (BASE_DIR / "data" / "processed" / "hidden_replay_input.csv", BASE_DIR / "data" / "processed" / "hidden_replay_input.parquet")
+    eval_file = next((path for path in candidates if path.is_file()), None)
     class_file = sub_dir / "classification.csv"
     replay_file = sub_dir / "replay.csv"
-    if not eval_file.is_file():
-        raise HTTPException(status_code=404, detail="Evaluation dataset is not installed.")
+    if eval_file is None:
+        raise HTTPException(status_code=404, detail="Unlabelled hidden replay input is not installed.")
     if not class_file.is_file() or not replay_file.is_file():
         raise HTTPException(
             status_code=409,
@@ -619,26 +696,25 @@ def get_flows_sample(limit: int = 50, offset: int = 0, class_filter: str | None 
         )
 
     try:
-        df = pd.read_parquet(eval_file)
+        df = pd.read_parquet(eval_file) if eval_file.suffix == ".parquet" else pd.read_csv(eval_file)
         classifications = pd.read_csv(class_file, dtype={"record_id": str})
-        replay = pd.read_csv(replay_file, dtype={"record_id": str, "applied_policy_id": str})
+        replay = pd.read_csv(replay_file, dtype={"record_id": str, "active_policy_id": str})
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Flow inspection data could not be loaded: {type(exc).__name__}") from exc
 
     has_class_cols = (
-        {"record_id", "predicted_class", "anomaly score", "evidence status"}.issubset(classifications.columns) or
         {"record_id", "predicted_class", "anomaly_score", "evidence_status"}.issubset(classifications.columns)
     )
-    required_replay = {"record_id", "action", "applied_policy_id"}
+    required_replay = {"record_id", "action", "active_policy_id"}
     if not has_class_cols or not required_replay.issubset(replay.columns):
         raise HTTPException(status_code=503, detail="Generated submission files do not match the official schema.")
 
     class_map = classifications.set_index("record_id").to_dict(orient="index")
     replay_map = replay.set_index("record_id").to_dict(orient="index")
 
-    def numeric_from_value(value: Any) -> float:
+    def numeric_from_value(value: Any) -> float | None:
         parsed = pd.to_numeric(value, errors="coerce")
-        return float(parsed) if pd.notna(parsed) else 0.0
+        return float(parsed) if pd.notna(parsed) else None
 
     rows = []
     for index, flow in df.iterrows():
@@ -650,17 +726,17 @@ def get_flows_sample(limit: int = 50, offset: int = 0, class_filter: str | None 
         predicted_class = str(prediction.get("predicted_class", ""))
         if class_filter and class_filter.upper() not in ("ALL", predicted_class.upper()):
             continue
-        applied = decision.get("applied_policy_id", "")
-        raw_score = prediction.get("anomaly score") if "anomaly score" in prediction else prediction.get("anomaly_score")
-        raw_evidence = prediction.get("evidence status") if "evidence status" in prediction else prediction.get("evidence_status", "INCOMPLETE")
+        applied = decision.get("active_policy_id") or ""
+        raw_score = prediction.get("anomaly_score")
+        raw_evidence = prediction.get("evidence_status", "UNCERTAIN")
         rows.append({
             "record_id": record_id,
             "predicted_class": predicted_class,
             "anomaly_score": numeric_from_value(raw_score),
             "evidence_status": str(raw_evidence),
             "action": str(decision.get("action", "")),
-            "applied_policy_id": "" if pd.isna(applied) else str(applied),
-            "destination_port": int(numeric_from_value(flow.get("Destination Port", 0))),
+            "active_policy_id": "" if pd.isna(applied) or not str(applied).strip() else str(applied),
+            "destination_port": int(numeric_from_value(flow.get("Destination Port"))) if numeric_from_value(flow.get("Destination Port")) is not None else None,
             "flow_duration": numeric_from_value(flow.get("Flow Duration", 0)),
             "total_fwd_packets": numeric_from_value(flow.get("Total Fwd Packets", 0)),
             "packet_length_mean": numeric_from_value(flow.get("Packet Length Mean", 0)),
@@ -677,8 +753,8 @@ def get_flows_sample(limit: int = 50, offset: int = 0, class_filter: str | None 
 
 @app.get("/api/policies")
 def get_policies(limit: int = 50, offset: int = 0):
-    """Retrieve policies generated during replay from outputs/submission/policy.csv."""
-    pol_file = BASE_DIR / "outputs" / "submission" / "policy.csv"
+    """Retrieve policies generated during replay from outputs/submission/policies.csv."""
+    pol_file = BASE_DIR / "outputs" / "submission" / "policies.csv"
     if not pol_file.is_file():
         return {"policies": [], "total": 0}
     try:
@@ -692,47 +768,65 @@ def get_policies(limit: int = 50, offset: int = 0):
 
 @app.post("/api/policies/test")
 def test_policy_prefilter(payload: dict[str, Any]):
-    """Test real policy pre-filter matching against an IP and sequence record index."""
+    """Test a policy against organizer record positions, not numeric record-ID arithmetic."""
     source_ip = str(payload.get("source_ip", "")).strip()
-    current_step = int(payload.get("current_step", 100))
+    current_step = payload.get("current_step", 1)
+    try:
+        current_step = int(current_step)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="current_step must be a 1-based organizer seq value.")
+    if not source_ip or current_step < 1:
+        raise HTTPException(status_code=422, detail="Provide a source_ip and a positive 1-based current_step.")
 
-    if not source_ip:
-        raise HTTPException(status_code=422, detail="Provide a non-empty source_ip string.")
+    candidates = (
+        BASE_DIR / "data" / "processed" / "hidden_replay_input.csv",
+        BASE_DIR / "data" / "processed" / "hidden_replay_input.parquet",
+    )
+    input_file = next((path for path in candidates if path.is_file()), None)
+    if input_file is None:
+        raise HTTPException(status_code=503, detail={
+            "code": "REPLAY_INPUT_NOT_AVAILABLE",
+            "message": "Install the organizer replay input to test policy activation by seq.",
+        })
+    try:
+        source = pd.read_parquet(input_file) if input_file.suffix == ".parquet" else pd.read_csv(input_file)
+        if not {"record_id", "seq"}.issubset(source.columns):
+            raise ValueError("Replay input must contain record_id and seq.")
+        positions = dict(zip(source["record_id"].astype(str), pd.to_numeric(source["seq"], errors="raise").astype(int)))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "REPLAY_INPUT_INVALID", "type": type(exc).__name__}) from exc
 
-    pol_file = BASE_DIR / "outputs" / "submission" / "policy.csv"
+    pol_file = BASE_DIR / "outputs" / "submission" / "policies.csv"
     matched_policy = None
     if pol_file.is_file():
         try:
-            pol_df = pd.read_csv(pol_file)
+            pol_df = pd.read_csv(pol_file, dtype=str, keep_default_na=False)
             matching = pol_df[
+                (pol_df["scope_type"] == "SOURCE_IP") &
                 (pol_df["scope_value"] == source_ip) &
-                (pol_df["activated_after_record_id"] < current_step) &
-                (pol_df["expires_after_record_id"] >= current_step)
+                (pol_df["activated_after_record_id"].map(positions) < current_step) &
+                (pol_df["expires_after_record_id"].map(positions) >= current_step)
             ]
             if not matching.empty:
-                matched_policy = matching.iloc[0].to_dict()
-        except Exception:
-            pass
+                matched_policy = matching.sort_values("policy_id").iloc[0].to_dict()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail={"code": "POLICY_FILE_INVALID", "type": type(exc).__name__}) from exc
 
     if matched_policy:
         return {
-            "matched": True,
-            "action": "BLOCK",
-            "policy_id": matched_policy["policy_id"],
+            "matched": True, "action": "BLOCK", "policy_id": matched_policy["policy_id"],
             "scope_value": matched_policy["scope_value"],
             "activated_after": matched_policy["activated_after_record_id"],
             "expires_after": matched_policy["expires_after_record_id"],
             "status": "ACTIVE_POLICY_MATCH",
-            "message": f"Pre-filter rule {matched_policy['policy_id']} drops flow from {source_ip} (active from record {matched_policy['activated_after_record_id']} to {matched_policy['expires_after_record_id']}).",
+            "message": f"Pre-filter rule {matched_policy['policy_id']} matches source IP {source_ip} at seq {current_step}.",
         }
-
     return {
-        "matched": False,
-        "action": "ALLOW",
-        "policy_id": "",
+        "matched": False, "action": "ALLOW", "policy_id": "",
         "status": "NO_MATCHING_POLICY",
-        "message": f"No active policy matches source IP {source_ip} at sequence step {current_step}. Flow is allowed through to 5-agent detection pipeline.",
+        "message": f"No active policy matches source IP {source_ip} at seq {current_step}.",
     }
+
 
 
 @app.get("/api/correlation/groups")

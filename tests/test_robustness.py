@@ -141,21 +141,21 @@ class TestAgent3FusionRobustness:
         a = AnomalyDetectionResult(anomaly_score=0.05, is_anomaly=False, status="success")
         f = self.fusion.fuse(t, a)
         assert f.action == "REVIEW"
-        assert f.evidence_status == "DISAGREE"
+        assert f.evidence_status == "CONFLICT"
 
     def test_disagreement_classifier_benign_anomaly_outlier_routes_to_review(self):
         t = ThreatDetectionResult(predicted_class="BENIGN", confidence=0.90, status="success")
         a = AnomalyDetectionResult(anomaly_score=0.85, is_anomaly=True, status="success")
         f = self.fusion.fuse(t, a)
         assert f.action == "REVIEW"
-        assert f.evidence_status == "DISAGREE"
+        assert f.evidence_status == "CONFLICT"
 
     def test_incomplete_evidence_fails_closed_to_review(self):
         t = ThreatDetectionResult(predicted_class="DOS", confidence=0.95, status="error")
         a = AnomalyDetectionResult(anomaly_score=None, is_anomaly=None, status="error")
         f = self.fusion.fuse(t, a)
         assert f.action == "REVIEW"
-        assert f.evidence_status == "INCOMPLETE"
+        assert f.evidence_status == "UNCERTAIN"
 
 
 # ============================================================================

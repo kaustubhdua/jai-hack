@@ -25,7 +25,7 @@ class AnomalyDetectionResult:
 @dataclass
 class FusionResult:
     final_class: BenchmarkClass | None
-    evidence_status: Literal["AGREE", "DISAGREE", "INCOMPLETE"]
+    evidence_status: Literal["AGREE", "CONFLICT", "UNCERTAIN"]
     action: PolicyAction
     rationale: list[str] = field(default_factory=list)
     agent_agreement: str | None = None
