@@ -106,3 +106,18 @@ def test_organizer_replay_metadata_is_not_a_supervised_feature():
     assert "destination_port" not in features.columns
     assert "seq" not in features.columns
     assert "protocol" not in features.columns
+
+
+def test_ground_truth_label_is_never_a_classifier_feature_or_prediction_input():
+    x, y = sample_data()
+    model = ThreatDetectionModel(n_estimators=25).fit(x, y)
+    baseline = model.predict_frame(x.iloc[:5])
+
+    with_labels = x.iloc[:5].copy()
+    with_labels["label"] = ["BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN"]
+    changed_labels = with_labels.copy()
+    changed_labels["label"] = list(reversed(changed_labels["label"].tolist()))
+
+    assert "label" not in numeric_features(with_labels).columns
+    assert model.predict_frame(with_labels) == baseline
+    assert model.predict_frame(changed_labels) == baseline
