@@ -148,6 +148,7 @@ def system_diagnostics():
         },
         "submission_artifacts": files,
         "history_database": {"present": history_db.is_file(), "persistent": not SERVERLESS_RUNTIME, "mode": "ephemeral" if SERVERLESS_RUNTIME else "local_sqlite"},
+        "supabase": {"configured": _supabase_persistence_configured(), "auth": "required" if _supabase_persistence_configured() else "not_configured", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies"]},
         "source_identity": "literal observed source IP only; missing or invalid endpoint values remain unknown and never become synthetic identities",
         "firewall": {"mode": "simulated-only", "host_firewall_modified": False},
     }
@@ -166,9 +167,15 @@ def get_history(request: Request, limit: int = 15):
             connection.request("GET", query, headers={"apikey": key, "Authorization": request.headers.get("authorization", "")})
             response = connection.getresponse()
             raw = response.read()
-            if response.status == 200:
-                return {"runs": json.loads(raw.decode("utf-8")), "source": "supabase"}
-            return {"runs": [], "source": "supabase", "error": f"supabase_http_{response.status}"}
+            if response.status != 200:
+                return {"runs": [], "evaluation_runs": [], "source": "supabase", "error": f"supabase_http_{response.status}"}
+            runs = json.loads(raw.decode("utf-8"))
+            eval_query = f"/rest/v1/analysis_runs?select=id,dataset_name,dataset_rows,processed_rows,status,model_version,accuracy,macro_f1,created_at&order=created_at.desc&limit={max(1, min(limit, 50))}"
+            connection.request("GET", eval_query, headers={"apikey": key, "Authorization": request.headers.get("authorization", "")})
+            eval_response = connection.getresponse()
+            eval_raw = eval_response.read()
+            evaluation_runs = json.loads(eval_raw.decode("utf-8")) if eval_response.status == 200 else []
+            return {"runs": runs, "evaluation_runs": evaluation_runs, "source": "supabase", "evaluation_history_available": eval_response.status == 200}
         except (OSError, TimeoutError):
             return {"runs": [], "source": "supabase", "error": "supabase_unreachable"}
         finally:
@@ -850,6 +857,43 @@ def validate_submissions(request: Request):
         raise HTTPException(status_code=422, detail="The evaluation dataset contains duplicate record_id values.")
 
     return SubmissionValidator.validate_submission_bundle(sub_dir, records, source_frame=source)
+
+
+@app.post("/api/evaluation/snapshot")
+def save_evaluation_snapshot(payload: dict[str, Any], request: Request):
+    """Save a provenance-bearing evaluation summary to the caller's private history."""
+    _require_authenticated_user(request)
+    dataset_name = str(payload.get("dataset_name") or "generated-evaluation-reports").strip()[:200]
+    if not dataset_name:
+        raise HTTPException(status_code=422, detail="dataset_name must not be empty.")
+    try:
+        dataset_rows = int(payload.get("dataset_rows", 0))
+        processed_rows = int(payload.get("processed_rows", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="dataset_rows and processed_rows must be integers.")
+    if dataset_rows < 0 or processed_rows < 0 or processed_rows > dataset_rows:
+        raise HTTPException(status_code=422, detail="Evaluation row counts are invalid.")
+    metrics = {}
+    for field in ("accuracy", "macro_f1"):
+        value = payload.get(field)
+        if value is None:
+            metrics[field] = None
+        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 1:
+            raise HTTPException(status_code=422, detail=f"{field} must be between 0 and 1.")
+        else:
+            metrics[field] = float(value)
+    status = str(payload.get("status") or "completed").lower()
+    if status not in {"queued", "running", "completed", "failed"}:
+        raise HTTPException(status_code=422, detail="Invalid evaluation snapshot status.")
+    summary = payload.get("summary") or {}
+    if not isinstance(summary, dict):
+        raise HTTPException(status_code=422, detail="summary must be a JSON object.")
+    record = {
+        "dataset_name": dataset_name, "dataset_rows": dataset_rows, "processed_rows": processed_rows,
+        "status": status, "model_version": str(payload.get("model_version") or "unknown")[:120],
+        "accuracy": metrics["accuracy"], "macro_f1": metrics["macro_f1"], "summary": summary,
+    }
+    return {"supabase_persistence": _supabase_insert_rows("analysis_runs", [record], request)}
 
 
 @app.get("/api/overview")
