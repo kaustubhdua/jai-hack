@@ -148,7 +148,7 @@ def system_diagnostics():
         },
         "submission_artifacts": files,
         "history_database": {"present": history_db.is_file(), "persistent": not SERVERLESS_RUNTIME, "mode": "ephemeral" if SERVERLESS_RUNTIME else "local_sqlite"},
-        "supabase": {"configured": _supabase_persistence_configured(), "auth": "required" if _supabase_persistence_configured() else "not_configured", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies"]},
+        "supabase": {"configured": _supabase_persistence_configured(), "auth": "required" if _supabase_persistence_configured() else "not_configured", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies", "replay_correlation_groups"]},
         "source_identity": "literal observed source IP only; missing or invalid endpoint values remain unknown and never become synthetic identities",
         "firewall": {"mode": "simulated-only", "host_firewall_modified": False},
     }
@@ -332,6 +332,35 @@ def _supabase_insert_rows(table: str, rows: list[dict[str, Any]], request: Reque
         connection.close()
 
 
+def _supabase_select_rows(table: str, query: str, request: Request) -> dict[str, Any]:
+    """Read only allow-listed user-scoped audit records through the caller's JWT."""
+    if table not in {"replay_runs", "replay_policies", "replay_correlation_groups"}:
+        return {"stored": False, "reason": "table_not_allowed", "rows": []}
+    user_id, auth_error = _supabase_user_id(request)
+    key = _supabase_public_key()
+    if not user_id or not key:
+        return {"stored": False, "reason": auth_error or "not_authenticated", "rows": []}
+    connection = http.client.HTTPSConnection("egwguyexqixmqytydesc.supabase.co", timeout=8)
+    try:
+        connection.request("GET", f"/rest/v1/{table}?{query}", headers={
+            "apikey": key, "Authorization": request.headers.get("authorization", ""),
+        })
+        response = connection.getresponse()
+        raw = response.read()
+        if response.status != 200:
+            return {"stored": False, "reason": f"supabase_http_{response.status}", "rows": []}
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, list):
+            return {"stored": False, "reason": "invalid_supabase_response", "rows": []}
+        return {"stored": True, "rows": payload}
+    except (OSError, TimeoutError):
+        return {"stored": False, "reason": "supabase_unreachable", "rows": []}
+    except Exception as exc:
+        return {"stored": False, "reason": f"supabase_error_{type(exc).__name__}", "rows": []}
+    finally:
+        connection.close()
+
+
 def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, source: str = "agent2_independent") -> dict[str, Any]:
     """Persist score metadata only; raw network-flow contents are never uploaded."""
     payload = result.to_dict()
@@ -385,7 +414,7 @@ def _persist_flow_events(results: list[dict[str, Any]], request: Request, source
     return {"stored": bool(flow_status.get("stored")), "flow_events": flow_status, "agent2_rows": len(agent2_records)}
 
 
-def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Request) -> dict[str, Any]:
+def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Request, correlation_groups: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Persist derived decisions and defensive policies, never the raw flow feature rows."""
     classification = results.get("classification_rows") or []
     replay = results.get("replay_rows") or []
@@ -424,7 +453,26 @@ def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Req
         outcome = _supabase_insert_rows("replay_policies", policies, request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions_saved": len(decisions), "policies": outcome}
-    return {"stored": True, "decisions_saved": len(decisions), "policies_saved": len(policies)}
+    groups = []
+    for group in correlation_groups or []:
+        groups.append({
+            "run_id": run_id,
+            "group_id": str(group["group_id"]),
+            "attack_type": str(group.get("attack_type") or "UNKNOWN"),
+            "source_identity": group.get("source_identity"),
+            "target_endpoints": group.get("target_endpoints") or [],
+            "member_record_ids": group.get("member_record_ids") or [],
+            "flow_count": int(group.get("flow_count") or 0),
+            "start_record_id": group.get("start_record_id"),
+            "end_record_id": group.get("end_record_id"),
+            "confidence": float(group["confidence"]) if group.get("confidence") is not None else None,
+            "evidence": group.get("evidence") or [],
+        })
+    if groups:
+        outcome = _supabase_insert_rows("replay_correlation_groups", groups, request)
+        if not outcome.get("stored"):
+            return {"stored": False, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups": outcome}
+    return {"stored": True, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups_saved": len(groups)}
 
 
 def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any], status: str, request: Request, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -611,7 +659,7 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
         status="COMPLETED",
     )
     cloud_persistence = _persist_replay_run(run_id, payload.dataset_name, metrics, "COMPLETED", request, {"mode": "supplied_batch_replay"})
-    artifact_persistence = _persist_replay_artifacts(results, run_id, request)
+    artifact_persistence = _persist_replay_artifacts(results, run_id, request, _LAST_CORRELATION_GROUPS)
     cloud_persistence["artifacts"] = artifact_persistence
 
     return {
@@ -1063,16 +1111,26 @@ def get_flows_sample(request: Request, limit: int = 50, offset: int = 0, class_f
 def get_policies(request: Request, limit: int = 50, offset: int = 0):
     """Retrieve policies generated during replay from outputs/submission/policies.csv."""
     _require_authenticated_user(request)
+    if _supabase_persistence_configured():
+        latest = _supabase_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
+        if not latest["stored"]:
+            return {"policies": [], "total": 0, "source": "supabase", "error": latest["reason"]}
+        if not latest["rows"]:
+            return {"policies": [], "total": 0, "source": "supabase"}
+        run_id = latest["rows"][0]["run_id"]
+        query = f"select=policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id,created_at&run_id=eq.{run_id}&order=created_at.desc&limit={limit}&offset={offset}"
+        result = _supabase_select_rows("replay_policies", query, request)
+        return {"policies": result["rows"], "total": len(result["rows"]), "offset": offset, "limit": limit, "source": "supabase", "error": result.get("reason")}
     pol_file = BASE_DIR / "outputs" / "submission" / "policies.csv"
     if not pol_file.is_file():
-        return {"policies": [], "total": 0}
+        return {"policies": [], "total": 0, "source": "local"}
     try:
         pol_df = pd.read_csv(pol_file)
         total = len(pol_df)
         subset = pol_df.iloc[offset : offset + limit].to_dict(orient="records")
-        return {"policies": subset, "total": total, "offset": offset, "limit": limit}
+        return {"policies": subset, "total": total, "offset": offset, "limit": limit, "source": "local"}
     except Exception as e:
-        return {"policies": [], "total": 0, "error": str(e)}
+        return {"policies": [], "total": 0, "error": str(e), "source": "local"}
 
 
 @app.post("/api/policies/test")
@@ -1151,6 +1209,18 @@ def get_correlation_groups(request: Request, limit: int = 20):
     _require_authenticated_user(request)
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 200.")
+    if _supabase_persistence_configured():
+        latest = _supabase_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
+        if not latest["stored"]:
+            raise HTTPException(status_code=503, detail={"code": "SUPABASE_READ_FAILED", "message": latest["reason"]})
+        if not latest["rows"]:
+            return {"groups": [], "total": 0, "source": "supabase", "synthetic": False}
+        run_id = latest["rows"][0]["run_id"]
+        query = f"select=group_id,attack_type,source_identity,target_endpoints,member_record_ids,flow_count,start_record_id,end_record_id,confidence,evidence,created_at&run_id=eq.{run_id}&order=created_at.desc&limit={limit}"
+        result = _supabase_select_rows("replay_correlation_groups", query, request)
+        if not result["stored"]:
+            raise HTTPException(status_code=503, detail={"code": "SUPABASE_READ_FAILED", "message": result["reason"]})
+        return {"groups": result["rows"], "total": len(result["rows"]), "source": "supabase_latest_replay", "synthetic": False}
     return {
         "groups": _LAST_CORRELATION_GROUPS[:limit],
         "total": len(_LAST_CORRELATION_GROUPS),
