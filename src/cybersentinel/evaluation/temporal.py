@@ -55,7 +55,7 @@ def evaluate_temporal_correlation(
         order = list(range(len(records)))
         ordering_mode = "input_order_timestamps_incomplete"
 
-    predictions = [_prediction(threat_agent, records[idx]) for idx in range(len(records))]
+    inference_records = [{key: value for key, value in row.items() if key != "label"} for row in records]\n    predictions = [_prediction(threat_agent, inference_records[idx]) for idx in range(len(records))]
     agent = TemporalCorrelationAgent(window_size=window_size)
     correlated_by_ground_truth: dict[str, int] = {}
     correlated_by_predicted_type: dict[str, int] = {}
@@ -152,7 +152,7 @@ def evaluate_temporal_correlation(
         shuffled_agent = TemporalCorrelationAgent(window_size=window_size)
         shuffled_correlated = 0
         for idx in shuffled_indices:
-            row = records[int(idx)]
+            row = inference_records[int(idx)]
             predicted_class, confidence = predictions[int(idx)]
             shuffled_result = shuffled_agent.correlate(
                 record_ids[int(idx)], row, threat_class=predicted_class, confidence=confidence
