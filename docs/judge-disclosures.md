@@ -13,7 +13,7 @@ The dataset audit found 8,161 distinct feature vectors shared by training and ev
 ## 3. Scores are not automatically probabilities
 
 - **Agent 1:** maximum `predict_proba` output is calibrated using the deterministic training-only holdout by default, or an organizer-provided separate labelled validation file when supplied. The manifest records which source was used.
-- **Agent 2:** the exported value is a bounded 0–1 anomaly index (higher means more anomalous), not a probability. Its operating threshold is applied to the underlying Isolation Forest decision function.
+- **Agent 2:** the exported value is a bounded 0–1 anomaly index (higher means more anomalous), not a probability. Its default operating threshold is derived from the BENIGN training-score distribution. Label-based threshold tuning is disabled by default and requires an explicitly permitted separate labelled validation file plus `--calibrate-anomaly-threshold`; the resulting threshold is still applied to the underlying Isolation Forest decision function.
 
 Report the exact model artifact and calibration provenance used for the run.
 
