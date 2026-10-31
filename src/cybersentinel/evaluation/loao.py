@@ -219,8 +219,34 @@ def evaluate_leave_one_attack_out(
         benign_df = train_df[train_df["label"] == "BENIGN"]
         anomaly_agent = AnomalyDetectionAgent().fit(benign_df)
 
-    if max_train_samples and len(train_df) > max_train_samples:
-        train_df = train_df.sample(n=max_train_samples, random_state=random_state)
+    if max_train_samples is not None:
+        if max_train_samples < len(ATTACK_CLASSES) + 1:
+            raise ValueError("max_train_samples must leave room for BENIGN and every non-held-out attack class.")
+        if len(train_df) > max_train_samples:
+            # Stratify the cap so the LOAO fit partition retains every available
+            # non-held-out class instead of accidentally dropping a rare class.
+            label_counts = train_df["label"].astype(str).value_counts()
+            quotas = {
+                label: max(1, int(max_train_samples * count / len(train_df)))
+                for label, count in label_counts.items()
+            }
+            while sum(quotas.values()) > max_train_samples:
+                candidates = [label for label, quota in quotas.items() if quota > 1]
+                if not candidates:
+                    raise ValueError("Unable to allocate stratified LOAO training sample.")
+                label = max(candidates, key=lambda key: quotas[key] - max_train_samples * label_counts[key] / len(train_df))
+                quotas[label] -= 1
+            while sum(quotas.values()) < max_train_samples:
+                candidates = [label for label, count in label_counts.items() if quotas[label] < count]
+                if not candidates:
+                    break
+                label = max(candidates, key=lambda key: max_train_samples * label_counts[key] / len(train_df) - quotas[key])
+                quotas[label] += 1
+            sampled = [
+                group.sample(n=quotas[label], random_state=random_state)
+                for label, group in train_df.groupby("label", sort=True)
+            ]
+            train_df = pd.concat(sampled).sample(frac=1.0, random_state=random_state).reset_index(drop=True)
 
     res = run_all_loao_experiments(
         train_df=train_df,
