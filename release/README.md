@@ -1,13 +1,25 @@
-# Release and QA archive
+# Release, Current Contract, and QA Archive
 
-The documents under `release/day2-final/`, `release/benchmarks/`, and `release/qa-reports/` preserve reports from earlier local runs. Some include test, model, replay, or UI status claims that depend on datasets, model binaries, and generated outputs that are not committed here. Read those claims as historical evidence, not as the current state of `main`.
+## Current entry points
 
-Before citing a benchmark or saying the system is submission-ready:
+- [Root README](../README.md): project scope, setup, disclosures, and runtime boundaries.
+- [Evaluation guide](../docs/evaluation.md): authorized training/evaluation separation and exact local workflow.
+- [Level 2 brief](../docs/level2-brief.md): currently implemented hidden replay contract.
+- [Hidden-input audit](benchmarks/hidden-input-audit.md): supplied input facts and hashes of downloaded stage-page templates.
+- [Submission contract](benchmarks/submission-contract-results.md): current file headers and semantic validation rules.
+- [Observed endpoint audit](benchmarks/source-ip-scope-audit.md): current no-synthetic-endpoint rule.
+- [Presentation runbook](benchmarks/operational-runbook.md): current rehearsal and submission workflow, including the required schema check.
 
-1. Check out the current `main` revision.
-2. Obtain the authorized organizer data and label mapping.
-3. Regenerate model artifacts, evaluation reports, and replay outputs.
-4. Record the code revision and input hashes with the results.
-5. Confirm current GitHub Actions checks and rerun the full local-data workflow.
+## Historical reports
 
-The root [README](../README.md), [data audit](../docs/data-intelligence.md), [evaluation guide](../docs/evaluation.md), and live GitHub Actions badges are the current entry points. Challenge data, model binaries, and generated submissions should remain outside Git unless organizers explicitly authorize publication.
+Files under `day2-final/` and `qa-reports/` are historical snapshots. Older benchmark and UI reports in `benchmarks/` are also historical unless explicitly listed above as current contract audits or the presentation runbook. Their model metrics, test counts, runtime states, APIs, screenshots, and submission statuses are not current verification. Each historical report is labelled at its top.
+
+Before citing any metric or saying the project is submission-ready:
+
+1. Use the latest `main` revision.
+2. Obtain the exact authorized organizer data and the current upload templates.
+3. Reproduce training, evaluation, replay, and independent validation with recorded input hashes and code revision.
+4. Confirm the current GitHub Actions runs.
+5. Claim organizer acceptance only when an actual successful response or receipt is available.
+
+Challenge data, model binaries, and generated submissions remain outside Git unless the organizers explicitly authorize publication.
