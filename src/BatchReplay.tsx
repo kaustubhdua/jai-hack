@@ -54,7 +54,9 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
       skipEmptyLines: "greedy",
       worker: true,
       chunk: result => {
-        parsed.push(...result.data.filter(row => row && Object.keys(row).length > 0));
+        for (const row of result.data) {
+          if (row && Object.keys(row).length > 0) parsed.push(row);
+        }
         parserErrorCount += result.errors.length;
         setParsedRows(parsed.length);
       },
