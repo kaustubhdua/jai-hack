@@ -34,13 +34,25 @@ Important limitations:
 
 Do not describe the Vercel deployment as a verified production SOC service until model/data provisioning, durable run storage, full replay execution, API routes, and browser workflows have been tested end-to-end in that environment.
 
-## Supabase
+## Public guest demonstration
 
-The Supabase project `jai-hack` currently contains one table, `public.analysis_runs`, with an owner foreign key to `auth.users`, a per-user history index, RLS enabled, and four ownership policies for SELECT, INSERT, UPDATE, and DELETE. The migration history is tracked in `supabase/migrations/`.
+The React application supports a public guest path when Supabase Auth is configured. On the sign-in screen, visitors can choose **Explore public demo without signing in**. Guest mode is intentionally read-only and exposes only:
 
-The table is currently empty. The React application has a Supabase client factory in `src/lib/supabase.ts`, but the current `src/App.tsx` does not use it for authentication or database access. The visible session is a local-analyst placeholder, and replay history is still stored and read through local SQLite. Therefore Supabase-backed sign-in and persistent replay history are **not yet integrated**. Do not claim cloud-backed authentication or history until the UI and API workflows use this table and are verified with real authenticated sessions and cross-user isolation tests.
+- The overview and illustrative five-agent architecture.
+- The browser-local CSV schema/label inspection tool. It does not upload the selected file or run inference.
+- The public liveness/model-readiness status displayed by the overview.
 
-The anonymous role has no privileges on `analysis_runs`; authenticated users have only SELECT, INSERT, UPDATE, and DELETE privileges, with RLS still enforcing row ownership. The Supabase Security Advisor currently reports that leaked-password protection is disabled. Enable it in the Supabase Auth password/security settings before production use.
+Guest mode does not load /api/history or /api/overview, and it hides the Flow Inspector, replay, evidence-fusion, correlation, adaptive-defense, audit/history, and system-diagnostics screens. Authenticated analyst access remains available through Supabase Auth.
+
+This is a presentation/demo boundary, not a replacement for server authorization. Sensitive API routes must continue to enforce Supabase bearer-token authentication and user ownership independently of frontend navigation. Do not expose service-role credentials in Vite environment variables or browser bundles. The public demo must never be used to expose private replay rows, generated submissions, or administrative operations.
+
+## Supabase authentication and data boundary
+
+The React app creates a Supabase client from VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, restores the browser session, and subscribes to auth-state changes. The analyst sign-in/sign-up screen is application-level authentication; Vercel deployment protection is a separate setting. The API client forwards the Supabase access token as a bearer token when a session exists.
+
+The API explicitly requires an authenticated user for private history, inference, replay, evaluation snapshot, submission download, policy, and correlation operations. Keep those checks in the backend even when the corresponding controls are hidden from guest users. The anonymous role must not gain access to private history tables; keep RLS enabled and verify ownership isolation with separate test users before production use.
+
+Supabase is not a substitute for durable job infrastructure. The current serverless runtime still has ephemeral local filesystem/SQLite behavior, and model/dataset artifacts are not provisioned by a standard Git deployment. Do not claim durable hosted replay history or production model-backed operation until those infrastructure paths are separately verified.
 
 ## Readiness checks
 
