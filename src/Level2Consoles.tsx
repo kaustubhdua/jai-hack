@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useEffect } from "react";
 import { apiFetch, downloadAuthenticatedFile } from "./lib/api";
+import { InferenceLoader, holdLoaderForMinimum } from "./components/InferenceLoader";
 import {
   Activity, Check, Database, Download, FileSpreadsheet, Fingerprint,
   Gauge, Layers, LockKeyhole, Play, RefreshCw,
@@ -262,6 +263,7 @@ export function EvidenceFusionStudio() {
   const [error, setError] = useState("");
 
   async function runFusion() {
+    const loadingStartedAt = Date.now();
     setBusy(true);
     setError("");
     try {
@@ -282,6 +284,7 @@ export function EvidenceFusionStudio() {
       setResult(null);
       setError(err instanceof Error ? err.message : "Fusion request failed.");
     } finally {
+      await holdLoaderForMinimum(loadingStartedAt);
       setBusy(false);
     }
   }
@@ -319,6 +322,7 @@ export function EvidenceFusionStudio() {
           <button className="primary-btn" type="button" onClick={runFusion} disabled={busy} style={{ marginTop: 16, width: "100%" }}>
             {busy ? "Evaluating with Agent 3…" : "Evaluate manual scenario"} <Fingerprint size={15}/>
           </button>
+          {busy && <InferenceLoader compact title="Agent 3 is evaluating evidence" detail="Applying the fusion rules to the supplied what-if inputs." />}
         </div>
 
         <div style={{ background: "var(--panel2)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
@@ -613,6 +617,7 @@ export function ReplayStudio({ modelReady }: { modelReady: boolean }) {
   }
 
   async function runOfficialReplay() {
+    const loadingStartedAt = Date.now();
     setRunning(true);
     setSummary(null);
     setError("");
@@ -624,6 +629,7 @@ export function ReplayStudio({ modelReady }: { modelReady: boolean }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Replay request failed.");
     } finally {
+      await holdLoaderForMinimum(loadingStartedAt, 800);
       setRunning(false);
     }
   }
@@ -669,7 +675,7 @@ export function ReplayStudio({ modelReady }: { modelReady: boolean }) {
         {!modelReady && <div className="parse-warning" style={{ marginTop: 14 }}>Model artifacts are not ready. Install the authorized labelled training pack, train both agents, and verify the saved artifacts.</div>}
         {inputStatus?.validation?.warnings?.length > 0 && <div className="parse-warning" style={{ marginTop: 10 }}>{inputStatus.validation.warnings.join(" ")}</div>}
         {inputStatus?.validation?.errors?.length > 0 && <div className="parse-warning" style={{ marginTop: 10 }}>{inputStatus.validation.errors.join(" ")}</div>}
-        {running && <div style={{ marginTop: 16, padding: 12, border: "1px solid var(--line)", borderRadius: 7, color: "var(--muted)", fontSize: 11 }} role="status" aria-live="polite">The backend is processing the actual dataset in chronological order. This operation may take several seconds; do not refresh this page.</div>}
+        {running && <InferenceLoader title="Chronological replay is running" detail="The backend is processing the installed dataset, evaluating the model pipeline and generating replay artifacts. Please keep this page open." />}
         {error && <div className="parse-warning" role="alert" style={{ marginTop: 14 }}>{error}</div>}
 
         {summary && metrics && <div style={{ marginTop: 17, borderTop: "1px solid var(--line)", paddingTop: 15 }}>
