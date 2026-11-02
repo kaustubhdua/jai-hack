@@ -63,8 +63,9 @@ const formatNumber = (n: number) => new Intl.NumberFormat("en-IN").format(n);
 
 export default function App() {
   const [authSession, setAuthSession] = useState<any>(null);
+  const [guestMode, setGuestMode] = useState(false);
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
-  const session = { user: { display_name: authSession?.user?.email ?? "Local analyst", email: authSession?.user?.email ?? null } };
+  const session = { user: { display_name: authSession?.user?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.user?.email ?? null } };
   const [health, setHealth] = useState<Health | null>(null);
 
   useEffect(() => {
@@ -178,7 +179,7 @@ export default function App() {
   const labelCoverage = totalLabels ? Math.round(knownLabels.reduce((n, l) => n + dataset!.labels[l], 0) / totalLabels * 100) : 0;
 
   if (supabase && authLoading) return <div className="app-shell"><main className="main-content"><div className="page-wrap"><div className="panel empty-inline">Checking secure Supabase session…</div></div></main></div>;
-  if (supabase && !authSession) return <AuthScreen />;
+  if (supabase && !authSession && !guestMode) return <AuthScreen onGuest={() => setGuestMode(true)} />;
 
   return <div className="app-shell">
     <ParticleBackdrop />
@@ -198,7 +199,7 @@ export default function App() {
         ["Model Intelligence", Cpu],
         ["Audit & History", Database],
         ["Settings & Health", SlidersHorizontal],
-      ].map(([name, Icon]: any) => (
+      ].filter(([name]) => !guestMode || name === "Overview" || name === "Five-Agent Architecture").map(([name, Icon]: any) => (
         <button
           key={name}
           className={"nav-item " + (activeNav === name ? "active" : "")}
@@ -233,7 +234,7 @@ export default function App() {
         <div className="crumb"><span>Workspace</span><span>/</span><b>{activeNav}</b></div>
         <div className="top-actions">
           <div className="env-pill"><span className="pulse-dot" /> OFFLINE REPLAY MODE</div>
-          <button className="icon-btn" title="Refresh API and replay status" onClick={() => { void checkHealth(); void loadOverview(); }}><RefreshCw size={16} /></button>
+          <button className="icon-btn" title="Refresh API and replay status" onClick={() => { void checkHealth(); if (!guestMode) void loadOverview(); }}><RefreshCw size={16} /></button>
           <div className="top-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
         </div>
       </header>
@@ -336,6 +337,7 @@ export default function App() {
               </div>
             </section>
 
+            {!guestMode ? (
             <section className="panel history-panel">
               <div className="panel-head history-head">
                 <div>
@@ -373,6 +375,19 @@ export default function App() {
                 </table>
               </div>
             </section>
+            ) : (
+              <section className="panel history-panel">
+                <div className="panel-head">
+                  <div>
+                    <div className="panel-kicker">PUBLIC DEMONSTRATION · READ ONLY</div>
+                    <h3>Explore the CyberSentinel workspace</h3>
+                    <p>This guest session has no access to private replay history, user records, cloud audit trails, or privileged analysis actions.</p>
+                  </div>
+                  <span className="tag tag-green">GUEST MODE</span>
+                </div>
+                <div className="empty-inline">You can explore the illustrative five-agent architecture and inspect a CSV locally in this browser. CSV inspection does not upload the file or run model inference.</div>
+              </section>
+            )}
           </>
         )}
 
@@ -403,7 +418,7 @@ export default function App() {
   </div>;
 }
 
-function AuthScreen() {
+function AuthScreen({ onGuest }: { onGuest: () => void }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -443,6 +458,7 @@ function AuthScreen() {
         {message && <div className="empty-inline" role="status">{message}</div>}
         <button className="primary-btn" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}</button>
       </form>
+      <button className="secondary-btn" type="button" style={{ width: "100%", justifyContent: "center", marginTop: 14 }} onClick={onGuest}>Explore public demo without signing in</button>
       <button className="text-btn" style={{ marginTop: 14 }} onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setMessage(""); }}>
         {mode === "signin" ? "New here? Create an account" : "Already registered? Sign in"}
       </button>
