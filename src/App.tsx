@@ -191,7 +191,7 @@ export default function App() {
     if (!file.name.toLowerCase().endsWith(".csv")) { setNotice("Please choose a CSV file."); return; }
     if (file.size > 100 * 1024 * 1024) { setNotice("CSV exceeds the 100 MB browser inspection limit."); return; }
     setBusy(true);
-    setParseProgress(0);
+    setParseProgress(null);
     setNotice("");
     let columns: string[] = [];
     let labelColumn: string | null = null;
