@@ -140,7 +140,7 @@ export default function App() {
         if (response.status === 503 && payload?.detail?.code === "REPLAY_ARTIFACTS_NOT_READY") {
           setOverview(null);
           setOverviewState("empty");
-          setOverviewMessage("No generated replay artifacts are installed in this deployment yet. Run and validate an official replay in the local analyst workspace to create them.");
+          setOverviewMessage("No generated replay artifacts are available in this runtime. Official replay uses local organizer files; results generated on your computer do not automatically appear in the hosted deployment.");
           return;
         }
         throw new Error("The replay summary could not be loaded. Check the API connection and try again.");
