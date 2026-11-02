@@ -50,7 +50,7 @@ This is a presentation/demo boundary, not a replacement for server authorization
 
 The React app creates a Supabase client from VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, restores the browser session, and subscribes to auth-state changes. The analyst sign-in/sign-up screen is application-level authentication; Vercel deployment protection is a separate setting. The API client forwards the Supabase access token as a bearer token when a session exists.
 
-The API explicitly requires an authenticated user for private history, inference, replay, evaluation snapshot, submission download, policy, and correlation operations. Keep those checks in the backend even when the corresponding controls are hidden from guest users. The anonymous role must not gain access to private history tables; keep RLS enabled and verify ownership isolation with separate test users before production use.
+The API explicitly requires an authenticated user for private history and overview data, inference, replay, evaluation snapshots, submission downloads, system diagnostics, policy, and correlation operations. Keep those checks in the backend even when the corresponding controls are hidden from guest users. The anonymous role must not gain access to private history tables; keep RLS enabled and verify ownership isolation with separate test users before production use.
 
 Supabase is not a substitute for durable job infrastructure. The current serverless runtime still has ephemeral local filesystem/SQLite behavior, and model/dataset artifacts are not provisioned by a standard Git deployment. Do not claim durable hosted replay history or production model-backed operation until those infrastructure paths are separately verified.
 
