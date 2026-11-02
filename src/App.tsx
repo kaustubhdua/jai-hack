@@ -67,6 +67,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
   const session = { user: { display_name: authSession?.user?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.user?.email ?? null } };
   const [health, setHealth] = useState<Health | null>(null);
+  const [healthLoading, setHealthLoading] = useState(true);
 
   useEffect(() => {
     if (!supabase) { setAuthLoading(false); return; }
@@ -81,6 +82,8 @@ export default function App() {
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
   const [overview, setOverview] = useState<any>(null);
+  const [overviewState, setOverviewState] = useState<"idle" | "loading" | "ready" | "empty" | "error">("loading");
+  const [overviewMessage, setOverviewMessage] = useState("");
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [historyMessage, setHistoryMessage] = useState("");
@@ -113,28 +116,50 @@ export default function App() {
   }, [loadHistory, authSession]);
 
   const loadOverview = useCallback(async () => {
+    setOverviewState("loading");
+    setOverviewMessage("");
     try {
       const response = await apiFetch("/api/overview");
-      if (!response.ok) throw new Error("Replay artifacts are not available");
-      setOverview(await response.json());
-    } catch {
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (response.status === 503 && payload?.detail?.code === "REPLAY_ARTIFACTS_NOT_READY") {
+          setOverview(null);
+          setOverviewState("empty");
+          setOverviewMessage("No generated replay artifacts are installed in this deployment yet. Run and validate an official replay in the local analyst workspace to create them.");
+          return;
+        }
+        throw new Error("The replay summary could not be loaded. Check the API connection and try again.");
+      }
+      if (!payload || typeof payload.metrics?.total_records !== "number" || typeof payload.metrics?.policies_created !== "number") {
+        throw new Error("The API returned an incomplete replay summary. Refresh and try again.");
+      }
+      setOverview(payload);
+      setOverviewState("ready");
+    } catch (error) {
       setOverview(null);
+      setOverviewState("error");
+      setOverviewMessage(error instanceof Error ? error.message : "The replay summary is unavailable. Try again.");
     }
   }, []);
 
   const checkHealth = useCallback(async () => {
+    setHealthLoading(true);
     try {
       const response = await apiFetch("/api/health");
       if (!response.ok) throw new Error("API unavailable");
       setHealth(await response.json());
     } catch {
       setHealth({ status: "unavailable", service: "CyberSentinel API", model_ready: false });
+    } finally {
+      setHealthLoading(false);
     }
   }, []);
   useEffect(() => {
     void checkHealth();
     if (supabase && !authSession) {
       setOverview(null);
+      setOverviewState("idle");
+      setOverviewMessage("");
       return;
     }
     void loadOverview();
@@ -217,8 +242,8 @@ export default function App() {
         <div className="system-card">
           <div className="system-card-head"><span className="pulse-dot" /> SYSTEM STATUS</div>
           <div className="system-row"><span>Web console</span><b className="status-ok">Operational</b></div>
-          <div className="system-row"><span>Inference API</span><b className={health?.status === "ok" ? "status-ok" : "status-warn"}>{health?.status === "ok" ? "Online" : "Not ready"}</b></div>
-          <div className="system-row"><span>ML models</span><b className={health?.model_ready ? "status-ok" : "status-warn"}>{health?.model_ready ? "Active" : "Pending"}</b></div>
+          <div className="system-row"><span>Inference API</span><b className={healthLoading ? "" : health?.status === "ok" ? "status-ok" : "status-warn"}>{healthLoading ? "Checking…" : health?.status === "ok" ? "Online" : "Unavailable"}</b></div>
+          <div className="system-row"><span>ML models</span><b className={healthLoading || !health ? "" : health.status !== "ok" ? "status-warn" : health.model_ready ? "status-ok" : "status-warn"}>{healthLoading ? "Checking…" : !health || health.status !== "ok" ? "Unknown" : health.model_ready ? "Active" : "Pending"}</b></div>
         </div>
         <div className="profile-row">
           <div className="profile-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
@@ -255,11 +280,24 @@ export default function App() {
         {activeNav === "Overview" && (
           <>
             <TopologyCommandCentre />
-            <section className="metrics-grid">
-              <Metric icon={Database} label="DATASET FLOWS" value={dataset ? formatNumber(dataset.rows) : (overview ? formatNumber(overview.metrics.total_records) : "—")} detail={dataset ? "Inspected in browser" : (overview ? "Verified replay artifact" : "Awaiting local replay artifacts") } tone="blue"/>
-              <Metric icon={ShieldAlert} label="POLICIES CREATED" value={overview ? formatNumber(overview.metrics.policies_created) : "—"} detail={overview ? "Generated by completed replay" : "No generated policy file detected"} tone="amber"/>
-              <Metric icon={ShieldCheck} label="ATTACK CONTAINMENT" value={typeof overview?.metrics?.attack_containment_rate === "number" ? overview.metrics.attack_containment_rate.toFixed(2) + "%" : "Not measured"} detail={typeof overview?.metrics?.attack_containment_rate === "number" ? formatNumber(overview.metrics.attacks_contained) + " labelled attack flows blocked" : "Hidden replay has no ground-truth labels"} tone="green"/>
-              <Metric icon={Cpu} label="BENIGN PRESERVED" value={typeof overview?.metrics?.benign_preservation_rate === "number" ? overview.metrics.benign_preservation_rate.toFixed(2) + "%" : "Not measured"} detail={typeof overview?.metrics?.benign_preservation_rate === "number" ? formatNumber(overview.metrics.benign_preserved) + " labelled benign flows preserved" : "Hidden replay has no ground-truth labels"} tone="violet"/>
+            {overviewState === "empty" && <div className="overview-state" role="status">{overviewMessage}</div>}
+            {overviewState === "error" && <div className="overview-state overview-state-error" role="alert"><span>{overviewMessage}</span><button className="secondary-btn" onClick={() => { void loadOverview(); }}><RefreshCw size={14}/> Retry</button></div>}
+            <section className="metrics-grid" aria-busy={overviewState === "loading"}>
+              {overviewState === "loading" ? (
+                <>
+                  <MetricSkeleton icon={Database} label="DATASET FLOWS" tone="blue"/>
+                  <MetricSkeleton icon={ShieldAlert} label="POLICIES CREATED" tone="amber"/>
+                  <MetricSkeleton icon={ShieldCheck} label="ATTACK CONTAINMENT" tone="green"/>
+                  <MetricSkeleton icon={Cpu} label="BENIGN PRESERVED" tone="violet"/>
+                </>
+              ) : (
+                <>
+                  <Metric icon={Database} label="DATASET FLOWS" value={dataset ? formatNumber(dataset.rows) : (overview ? formatNumber(overview.metrics.total_records) : "—")} detail={dataset ? "Inspected in browser" : (overview ? "Verified replay artifact" : "Awaiting local replay artifacts")} tone="blue"/>
+                  <Metric icon={ShieldAlert} label="POLICIES CREATED" value={overview ? formatNumber(overview.metrics.policies_created) : "—"} detail={overview ? "Generated by completed replay" : "No generated policy file detected"} tone="amber"/>
+                  <Metric icon={ShieldCheck} label="ATTACK CONTAINMENT" value={typeof overview?.metrics?.attack_containment_rate === "number" ? overview.metrics.attack_containment_rate.toFixed(2) + "%" : "Not measured"} detail={typeof overview?.metrics?.attack_containment_rate === "number" ? formatNumber(overview.metrics.attacks_contained) + " labelled attack flows blocked" : "Hidden replay has no ground-truth labels"} tone="green"/>
+                  <Metric icon={Cpu} label="BENIGN PRESERVED" value={typeof overview?.metrics?.benign_preservation_rate === "number" ? overview.metrics.benign_preservation_rate.toFixed(2) + "%" : "Not measured"} detail={typeof overview?.metrics?.benign_preservation_rate === "number" ? formatNumber(overview.metrics.benign_preserved) + " labelled benign flows preserved" : "Hidden replay has no ground-truth labels"} tone="violet"/>
+                </>
+              )}
             </section>
 
             <section className="content-grid">
@@ -463,6 +501,15 @@ function AuthScreen({ onGuest }: { onGuest: () => void }) {
         {mode === "signin" ? "New here? Create an account" : "Already registered? Sign in"}
       </button>
     </section>
+  </div>;
+}
+
+function MetricSkeleton({ icon: Icon, label, tone }: { icon: any; label: string; tone: string }) {
+  return <div className="metric-card" aria-hidden="true">
+    <div className={"metric-icon " + tone}><Icon size={18} /></div>
+    <div className="metric-label">{label}</div>
+    <div className="dashboard-skeleton dashboard-skeleton-value" />
+    <div className="dashboard-skeleton dashboard-skeleton-detail" />
   </div>;
 }
 
