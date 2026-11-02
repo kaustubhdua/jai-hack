@@ -147,8 +147,10 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
 
     const stop = (parser: Papa.Parser, message: string) => {
       if (finished) return;
-      parser.abort();
+      // Mark the operation finished before aborting: Papa may invoke complete
+      // immediately for an aborted parse, and the original error must win.
       void finish(message);
+      parser.abort();
     };
 
     async function submitRows(chunkRows: Record<string, unknown>[]) {
