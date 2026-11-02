@@ -74,10 +74,17 @@ export default function App() {
     if (!supabase) { setAuthLoading(false); return; }
     let active = true;
     void supabase.auth.getSession().then(({ data }) => {
-      if (active) { setAuthSession(data.session); setAuthLoading(false); }
+      if (active) {
+        setAuthSession(data.session);
+        // Anonymous visitors enter the public, read-only demo by default.
+        setGuestMode(!data.session);
+        setAuthLoading(false);
+      }
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setAuthSession(nextSession);
+      // Signing out returns to the public demo instead of a login wall.
+      setGuestMode(!nextSession);
       setAuthLoading(false);
     });
     return () => { active = false; subscription.unsubscribe(); };
@@ -260,6 +267,7 @@ export default function App() {
         <div className="crumb"><span>Workspace</span><span>/</span><b>{activeNav}</b></div>
         <div className="top-actions">
           <div className="env-pill"><span className="pulse-dot" /> OFFLINE REPLAY MODE</div>
+          {guestMode && supabase && <button className="secondary-btn" onClick={() => setGuestMode(false)}>Sign in</button>}
           <button className="icon-btn" title="Refresh API and replay status" onClick={() => { void checkHealth(); if (!guestMode) void loadOverview(); }}><RefreshCw size={16} /></button>
           <div className="top-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
         </div>
