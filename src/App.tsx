@@ -7,6 +7,7 @@ import {
   ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles
 } from "lucide-react";
 import { ParticleBackdrop } from "./components/ParticleBackdrop";
+import "./components/DashboardStates.css";
 import { supabase } from "./lib/supabase";
 import { apiFetch } from "./lib/api";
 const Agent2Console = lazy(() => import("./FlowInspector").then(module => ({ default: module.Agent2Console })));
