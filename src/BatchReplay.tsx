@@ -23,6 +23,8 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [busy, setBusy] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [parsedRows, setParsedRows] = useState(0);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [summary, setSummary] = useState<BatchResponse | null>(null);
@@ -33,6 +35,7 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
     setSummary(null);
     setRows([]);
     setProgress(0);
+    setParsedRows(0);
     setFileName(file.name);
     if (!file.name.toLowerCase().endsWith(".csv")) {
       setError("Choose a CSV file containing one network-flow record per row.");
@@ -42,23 +45,35 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
       setError("CSV exceeds the 100 MB browser replay limit.");
       return;
     }
+    setParsing(true);
+    const parsed: Record<string, unknown>[] = [];
+    let parserErrorCount = 0;
     Papa.parse<Record<string, unknown>>(file, {
       header: true,
       dynamicTyping: true,
       skipEmptyLines: "greedy",
-      complete: result => {
-        const data = result.data.filter(row => row && Object.keys(row).length > 0);
-        if (!data.length) {
+      worker: true,
+      chunk: result => {
+        parsed.push(...result.data.filter(row => row && Object.keys(row).length > 0));
+        parserErrorCount += result.errors.length;
+        setParsedRows(parsed.length);
+      },
+      complete: () => {
+        setParsing(false);
+        if (!parsed.length) {
           setError("The CSV contains no usable data rows.");
           return;
         }
-        if (result.errors.length) {
-          setError("CSV parser reported " + result.errors.length + " issue(s). Inspect the file before replay.");
+        if (parserErrorCount) {
+          setError("CSV parser reported " + parserErrorCount + " issue(s). Inspect the file before replay.");
           return;
         }
-        setRows(data);
+        setRows(parsed);
       },
-      error: reason => setError(reason.message || "Could not parse the CSV file."),
+      error: reason => {
+        setParsing(false);
+        setError(reason.message || "Could not parse the CSV file.");
+      },
     });
   }
 
@@ -126,11 +141,16 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
     </div>
     <label className="upload-zone" style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
       <UploadCloud size={20}/><span><b>{fileName || "Choose a flow CSV"}</b><small>{rows.length ? rows.length.toLocaleString() + " rows parsed" : "CSV only · up to 100 MB"}</small></span>
-      <input type="file" accept=".csv,text/csv" onChange={event => selectFile(event.target.files?.[0])} hidden />
+      <input type="file" accept=".csv,text/csv" disabled={parsing || busy} onChange={event => { selectFile(event.target.files?.[0]); event.currentTarget.value = ""; }} hidden />
     </label>
+    {parsing && <div className="csv-processing" role="status" aria-live="polite" aria-atomic="true">
+      <span className="csv-processing-spinner" aria-hidden="true" />
+      <div><b>Preparing replay dataset</b><span>{parsedRows.toLocaleString()} rows parsed in a background worker…</span></div>
+      <div className="csv-processing-track indeterminate" aria-hidden="true"><i /></div>
+    </div>}
     <div className="panel-foot">
       <span><Activity size={13}/> {progress.toLocaleString()} / {rows.length.toLocaleString()} rows processed</span>
-      <button className="primary-btn" disabled={!modelReady || !rows.length || busy} onClick={replay}>
+      <button className="primary-btn" disabled={!modelReady || !rows.length || busy || parsing} onClick={replay}>
         <Play size={14}/>{busy ? "Replaying…" : "Run batch replay"}
       </button>
     </div>
