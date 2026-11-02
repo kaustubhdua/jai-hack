@@ -1590,6 +1590,8 @@ td {
 .csv-processing span:not(.csv-processing-spinner) { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .csv-processing-track { grid-column: 2; height: 3px; overflow: hidden; border-radius: 8px; background: rgba(56, 189, 248, .12); }
 .csv-processing-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #38bdf8, #818cf8); transition: width .18s ease; }
+.csv-processing-track.indeterminate i { width: 34%; animation: csv-processing-sweep 1.4s ease-in-out infinite; }
+@keyframes csv-processing-sweep { from { transform: translateX(-115%); } to { transform: translateX(310%); } }
 .history-loading { padding: 20px 10px; color: var(--muted); font-size: 11px; }
 @keyframes workspace-spin { to { transform: rotate(360deg); } }
 @keyframes workspace-shimmer { to { background-position: -220% 0; } }
