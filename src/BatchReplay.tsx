@@ -2,6 +2,7 @@ import { useState } from "react";
 import { apiFetch } from "./lib/api";
 import Papa from "papaparse";
 import { Activity, FileSpreadsheet, Play, UploadCloud } from "lucide-react";
+import { InferenceLoader, holdLoaderForMinimum } from "./components/InferenceLoader";
 
 type ReplayRow = {
   final_class: string | null;
@@ -63,6 +64,7 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
 
   async function replay() {
     if (!rows.length || !modelReady) return;
+    const loadingStartedAt = Date.now();
     setBusy(true);
     setError("");
     setSummary(null);
@@ -108,6 +110,7 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Batch replay stopped unexpectedly.");
     } finally {
+      await holdLoaderForMinimum(loadingStartedAt);
       setBusy(false);
     }
   }
@@ -131,6 +134,7 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
       </button>
     </div>
     {rows.length > 0 && <div className="progress-track"><div className="progress-value" style={{ width: (progress / rows.length * 100) + "%" }}/></div>}
+    {busy && <InferenceLoader compact title="Running chronological batch inference" detail={`${progress.toLocaleString()} of ${rows.length.toLocaleString()} rows processed. The backend reports progress after each completed batch.`} />}
     {!modelReady && <div className="empty-inline">Batch inference remains disabled until both trained model artifacts are deployed and verified.</div>}
     {error && <div className="parse-warning" role="alert">{error}</div>}
     {summary && <div className="dataset-loaded" style={{ marginTop: 18 }}>
