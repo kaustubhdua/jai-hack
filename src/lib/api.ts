@@ -25,3 +25,18 @@ export async function downloadAuthenticatedFile(path: string, filename: string):
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+export async function readApiPayload<T = unknown>(response: Response): Promise<T | null> {
+  return await response.json().catch(() => null) as T | null;
+}
+
+export function apiErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") return fallback;
+  const detail = (payload as Record<string, unknown>).detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object") {
+    const message = (detail as Record<string, unknown>).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
