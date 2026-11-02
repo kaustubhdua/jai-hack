@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { apiFetch } from "./lib/api";
+import { apiErrorMessage, apiFetch, readApiPayload } from "./lib/api";
 import Papa from "papaparse";
 import { Activity, FileSpreadsheet, Play, UploadCloud } from "lucide-react";
 import { InferenceLoader, holdLoaderForMinimum } from "./components/InferenceLoader";
@@ -85,11 +85,12 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ flows: chunk }),
         });
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(String(payload?.detail?.message ?? payload?.detail ?? "Batch replay failed."));
+        const payload = await readApiPayload<Partial<BatchResponse> & { detail?: unknown }>(response);
+        if (!response.ok) throw new Error(apiErrorMessage(payload, "Batch replay failed."));
+        if (!payload || typeof payload.total_analyzed !== "number" || !payload.actions || !Array.isArray(payload.results)) {
+          throw new Error("The batch API returned an incomplete response. No further rows were submitted.");
         }
-        aggregate.total_analyzed += Number(payload.total_analyzed || 0);
+        aggregate.total_analyzed += payload.total_analyzed;
         const persistence = payload.supabase_persistence;
         if (!persistence?.stored) {
           aggregate.supabase_persistence = { stored: false, reason: persistence?.reason || "not_confirmed" };
