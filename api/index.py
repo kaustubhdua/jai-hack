@@ -105,8 +105,9 @@ def health():
 
 
 @app.get("/api/system/diagnostics")
-def system_diagnostics():
-    """Expose actual local artifact presence without inventing readiness."""
+def system_diagnostics(request: Request):
+    """Expose actual local artifact presence only to an authenticated analyst."""
+    _require_authenticated_user(request)
     dataset_candidates = (BASE_DIR / "data" / "processed" / "hidden_replay_input.csv", BASE_DIR / "data" / "processed" / "hidden_replay_input.parquet")
     dataset = next((path for path in dataset_candidates if path.is_file()), dataset_candidates[-1])
     history_db = BASE_DIR / "data" / "cybersentinel_history.db"
