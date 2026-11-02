@@ -186,7 +186,7 @@ export default function App() {
     {mobileNavOpen && <button type="button" className="mobile-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
     <aside className={"sidebar" + (mobileNavOpen ? " mobile-open" : "")}>
       <div className="brand"><div className="brand-mark"><Shield size={21} /></div><span>CYBERSENTINEL</span></div>
-      <div className="workspace"><div className="workspace-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div><div><b>{authSession ? session.user.display_name : "LOCAL ANALYST"}</b><small>{authSession ? "Secure workspace" : "Offline workspace"}</small></div><ChevronDown size={14} /></div>
+      <div className="workspace"><div className="workspace-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div><div><b>{authSession ? session.user.display_name : "LOCAL ANALYST"}</b><small>{authSession ? "Secure workspace" : guestMode ? "Public read-only demo" : "Offline workspace"}</small></div><ChevronDown size={14} /></div>
       <div className="nav-label">COMMAND WORKSPACE</div>
       {[
         ["Overview", Gauge],
@@ -197,7 +197,7 @@ export default function App() {
         ["Adaptive Defense", ShieldAlert],
         ["Replay Studio", Play],
         ["Model Intelligence", Cpu],
-        ["Audit & History", Database],
+        ["Audit & Local History", Database],
         ["Settings & Health", SlidersHorizontal],
       ].filter(([name]) => !guestMode || name === "Overview" || name === "Five-Agent Architecture").map(([name, Icon]: any) => (
         <button
@@ -222,7 +222,7 @@ export default function App() {
         </div>
         <div className="profile-row">
           <div className="profile-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
-          <div className="profile-meta"><b>{session.user.display_name}</b><small>{authSession ? "Authenticated Supabase user" : "Local analyst session"}</small></div>
+          <div className="profile-meta"><b>{session.user.display_name}</b><small>{authSession ? "Authenticated Supabase user" : guestMode ? "Guest · read-only access" : "Local analyst session"}</small></div>
           {authSession && <button className="secondary-btn" onClick={() => { void supabase?.auth.signOut(); }} style={{ padding: "5px 8px", fontSize: 10 }}>Sign out</button>}
         </div>
       </div>
