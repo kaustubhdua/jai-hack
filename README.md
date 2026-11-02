@@ -565,12 +565,14 @@ Routes that require absent data/model artifacts return an explicit unavailable/e
 
 The documented and authoritative workflow is local/offline. The repository is connected to Vercel, but Git deployments do not include git-ignored organizer datasets or fitted models. The deployment notes record that the frontend/API bundle can be packaged while model-backed endpoints remain unavailable until authorized artifacts are provisioned.
 
+The public production console opens directly in a **read-only guest demo** for visitors without a Supabase session. Guests can explore the overview and five-agent architecture and inspect a CSV locally in their browser; the file is not uploaded and this inspection does not run model inference. Sign-in is optional and is used for private replay history and privileged inference/replay actions. The backend independently enforces authentication on those operational routes.
+
 Additional limitations documented in `docs/deployment.md`:
 
 - The Vercel Python function has a 30-second configured maximum duration; full replay may exceed it.
 - Run history uses local SQLite, not durable shared storage across serverless instances.
 - A Vercel READY deployment indicates build/deployment state, not end-to-end model readiness, full replay success, or official organizer acceptance.
-- Preview SSO can prevent unauthenticated external browser verification.
+- Preview deployments may still be protected by Vercel SSO; the production guest demo is intended for public viewing.
 
 Do not present the hosted deployment as a production-ready live SOC service unless its data/model provisioning, durable storage, complete replay, API routes, and browser workflows have been independently tested in that environment.
 
