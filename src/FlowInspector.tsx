@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { apiFetch } from "./lib/api";
+import { InferenceLoader, holdLoaderForMinimum } from "./components/InferenceLoader";
 import {
   Activity, ArrowRight, Cpu, LockKeyhole, Network,
   Copy, Check, BarChart3
@@ -43,6 +44,7 @@ export function FlowInspector({ modelReady }: { modelReady: boolean }) {
       setError(reason instanceof Error ? reason.message : "Invalid JSON.");
       return;
     }
+    const loadingStartedAt = Date.now();
     setBusy(true);
     setError("");
     setResult(null);
@@ -60,6 +62,7 @@ export function FlowInspector({ modelReady }: { modelReady: boolean }) {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The flow could not be analyzed.");
     } finally {
+      await holdLoaderForMinimum(loadingStartedAt);
       setBusy(false);
     }
   }
@@ -197,6 +200,8 @@ export function FlowInspector({ modelReady }: { modelReady: boolean }) {
           {busy ? "Running A1–A3 model inference…" : "Analyze observed flow"} <ArrowRight size={14} />
         </button>
       </div>
+
+      {busy && <InferenceLoader title="Running A1–A3 model inference" detail="Scoring the observed flow, comparing anomaly signals and assembling the evidence-based result." />}
 
       {!modelReady && (
         <div className="empty-inline" style={{ marginTop: 12 }}>
@@ -390,6 +395,7 @@ export function Agent2Console({ ready }: { ready: boolean }) {
           {busy ? "Scoring…" : "Run Agent 2"} <ArrowRight size={14} />
         </button>
       </div>
+      {busy && <InferenceLoader compact title="Agent 2 is scoring this flow" detail="Comparing the observed features against the trained benign-only baseline." />}
       {!ready && <div className="empty-inline">Agent 2 is not ready yet. Install the trained anomaly model and refresh API status.</div>}
       {error && <div className="parse-warning" role="alert">{error}</div>}
       {result && (
