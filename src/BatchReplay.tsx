@@ -255,7 +255,7 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
   return <section className="panel dataset-panel" style={{ marginBottom: 22 }}>
     <div className="panel-head">
       <div><div className="panel-kicker">OFFLINE DATASET REPLAY</div><h3>Batch flow analysis</h3>
-        <p>Validate a real CSV, then stream it through the trained agents in bounded batches. Raw records remain in this browser session and are not uploaded as a file.</p></div>
+        <p>Validate a real CSV, then stream its rows to the authenticated inference API in bounded batches. The original CSV file is not uploaded as a single file.</p></div>
       <span className="panel-icon"><FileSpreadsheet size={18}/></span>
     </div>
     <label className="upload-zone" style={{ display: "flex", alignItems: "center", gap: 12, cursor: busy || parsing ? "not-allowed" : "pointer" }}>
