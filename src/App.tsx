@@ -104,7 +104,7 @@ export default function App() {
   const [historyMessage, setHistoryMessage] = useState("");
   const [historyLoading, setHistoryLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [parseProgress, setParseProgress] = useState<number | null>(null);
+  const [parsedRows, setParsedRows] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
   const [activeNav, setActiveNav] = useState("Overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -191,7 +191,7 @@ export default function App() {
     if (!file.name.toLowerCase().endsWith(".csv")) { setNotice("Please choose a CSV file."); return; }
     if (file.size > 100 * 1024 * 1024) { setNotice("CSV exceeds the 100 MB browser inspection limit."); return; }
     setBusy(true);
-    setParseProgress(null);
+    setParsedRows(null);
     setNotice("");
     let columns: string[] = [];
     let labelColumn: string | null = null;
@@ -218,24 +218,24 @@ export default function App() {
           }
         }
         if (errors.length < 4) errors.push(...result.errors.slice(0, 4 - errors.length).map(issue => issue.message));
-        if (typeof result.meta.cursor === "number" && file.size > 0) setParseProgress(Math.min(99, Math.round(result.meta.cursor / file.size * 100)));
+        setParsedRows(rowCount);
       },
       complete: () => {
         if (!columns.length || rowCount === 0) {
           setDataset(null);
           setBusy(false);
-          setParseProgress(null);
+          setParsedRows(null);
           setNotice("The CSV must contain a header row and at least one non-empty data row.");
           return;
         }
         setDataset({ name: file.name, rows: rowCount, columns, labels, labelColumn, errors });
         setBusy(false);
-        setParseProgress(null);
+        setParsedRows(null);
         setNotice("CSV inspected locally in your browser. The file was not uploaded.");
       },
       error: error => {
         setBusy(false);
-        setParseProgress(null);
+        setParsedRows(null);
         setNotice("Could not parse CSV: " + error.message);
       }
     });
@@ -364,8 +364,8 @@ export default function App() {
                     </button>
                     {busy && <div className="csv-processing" role="status" aria-live="polite" aria-atomic="true">
                       <span className="csv-processing-spinner" aria-hidden="true" />
-                      <div><b>Inspecting CSV locally</b><span>{parseProgress === null ? "Parsing rows in a background worker…" : String(parseProgress) + "% read · Counting labels in your browser"}</span></div>
-                      <div className="csv-processing-track" aria-hidden="true"><i style={{ width: (parseProgress ?? 8) + "%" }} /></div>
+                      <div><b>Inspecting CSV locally</b><span>{parsedRows === null ? "Starting background parser…" : parsedRows.toLocaleString() + " rows inspected so far · Counting labels in your browser"}</span></div>
+                      <div className="csv-processing-track indeterminate" aria-hidden="true"><i /></div>
                     </div>}
                   </>
                 ) : (
