@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { apiFetch } from "./lib/api";
+import { apiErrorMessage, apiFetch, readApiPayload } from "./lib/api";
 import { InferenceLoader, holdLoaderForMinimum } from "./components/InferenceLoader";
 import {
   Activity, ArrowRight, Cpu, LockKeyhole, Network,
@@ -54,11 +54,10 @@ export function FlowInspector({ modelReady }: { modelReady: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ flow }),
       });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(String(payload?.detail?.message ?? payload?.detail ?? "Analysis request failed."));
-      }
-      setResult(payload as FlowResult);
+      const payload = await readApiPayload<FlowResult>(response);
+      if (!response.ok) throw new Error(apiErrorMessage(payload, "Analysis request failed."));
+      if (!payload) throw new Error("The analysis API returned an unreadable response. Please retry.");
+      setResult(payload);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The flow could not be analyzed.");
     } finally {
@@ -340,6 +339,7 @@ export function Agent2Console({ ready }: { ready: boolean }) {
       setError(reason instanceof Error ? reason.message : "Invalid JSON.");
       return;
     }
+    const loadingStartedAt = Date.now();
     setBusy(true);
     setError("");
     setResult(null);
@@ -349,12 +349,14 @@ export function Agent2Console({ ready }: { ready: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ flow }),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(String(payload?.detail?.message ?? payload?.detail ?? "Agent 2 scoring failed."));
-      setResult(payload as AnomalyResult);
+      const payload = await readApiPayload<AnomalyResult>(response);
+      if (!response.ok) throw new Error(apiErrorMessage(payload, "Agent 2 scoring failed."));
+      if (!payload) throw new Error("Agent 2 returned an unreadable response. Please retry.");
+      setResult(payload);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Agent 2 could not score this flow.");
     } finally {
+      await holdLoaderForMinimum(loadingStartedAt);
       setBusy(false);
     }
   }

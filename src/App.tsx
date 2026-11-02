@@ -102,13 +102,16 @@ export default function App() {
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [historyMessage, setHistoryMessage] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [parsedRows, setParsedRows] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
   const [activeNav, setActiveNav] = useState("Overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
     try {
       const response = await apiFetch("/api/history?limit=8");
       if (!response.ok) throw new Error("Local history API unavailable");
@@ -118,6 +121,8 @@ export default function App() {
     } catch {
       setHistory([]);
       setHistoryMessage("Private replay history is unavailable. Check the API connection and your Supabase session.");
+    } finally {
+      setHistoryLoading(false);
     }
   }, []);
 
@@ -125,6 +130,7 @@ export default function App() {
     if (supabase && !authSession) {
       setHistory([]);
       setHistoryMessage("");
+      setHistoryLoading(false);
       return;
     }
     void loadHistory();
@@ -184,33 +190,54 @@ export default function App() {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".csv")) { setNotice("Please choose a CSV file."); return; }
     if (file.size > 100 * 1024 * 1024) { setNotice("CSV exceeds the 100 MB browser inspection limit."); return; }
-    setBusy(true); setNotice("");
+    setBusy(true);
+    setParsedRows(null);
+    setNotice("");
+    let columns: string[] = [];
+    let labelColumn: string | null = null;
+    let rowCount = 0;
+    const labels: Record<string, number> = {};
+    const errors: string[] = [];
     Papa.parse<Record<string, string>>(file, {
-      header: true, skipEmptyLines: "greedy", dynamicTyping: false,
-      complete: (result) => {
-        const columns = result.meta.fields ?? [];
-        if (!columns.length || !result.data.length) {
-          setDataset(null);
-          setBusy(false);
-          setNotice("The CSV must contain a header row and at least one non-empty data row.");
-          return;
+      header: true,
+      skipEmptyLines: "greedy",
+      dynamicTyping: false,
+      worker: true,
+      chunk: (result) => {
+        if (!columns.length) {
+          columns = result.meta.fields ?? [];
+          const normalized = columns.map(column => column.trim().toLowerCase());
+          const labelIndex = normalized.findIndex(column => ["label", "class", "attack", "target"].includes(column));
+          labelColumn = labelIndex >= 0 ? columns[labelIndex] : null;
         }
-        const normalized = columns.map(c => c.trim().toLowerCase());
-        const labelIndex = normalized.findIndex(c => ["label", "class", "attack", "target"].includes(c));
-        const labelColumn = labelIndex >= 0 ? columns[labelIndex] : null;
-        const labels: Record<string, number> = {};
+        rowCount += result.data.length;
         if (labelColumn) {
           for (const row of result.data) {
             const label = String(row[labelColumn] ?? "").trim().toUpperCase();
             if (label) labels[label] = (labels[label] ?? 0) + 1;
           }
         }
-        const errors = result.errors.slice(0, 4).map(e => e.message);
-        setDataset({ name: file.name, rows: result.data.length, columns, labels, labelColumn, errors });
+        if (errors.length < 4) errors.push(...result.errors.slice(0, 4 - errors.length).map(issue => issue.message));
+        setParsedRows(rowCount);
+      },
+      complete: () => {
+        if (!columns.length || rowCount === 0) {
+          setDataset(null);
+          setBusy(false);
+          setParsedRows(null);
+          setNotice("The CSV must contain a header row and at least one non-empty data row.");
+          return;
+        }
+        setDataset({ name: file.name, rows: rowCount, columns, labels, labelColumn, errors });
         setBusy(false);
+        setParsedRows(null);
         setNotice("CSV inspected locally in your browser. The file was not uploaded.");
       },
-      error: (error) => { setBusy(false); setNotice("Could not parse CSV: " + error.message); }
+      error: error => {
+        setBusy(false);
+        setParsedRows(null);
+        setNotice("Could not parse CSV: " + error.message);
+      }
     });
   }
 
@@ -218,7 +245,7 @@ export default function App() {
   const totalLabels = dataset ? Object.values(dataset.labels).reduce((a, b) => a + b, 0) : 0;
   const labelCoverage = totalLabels ? Math.round(knownLabels.reduce((n, l) => n + dataset!.labels[l], 0) / totalLabels * 100) : 0;
 
-  if (supabase && authLoading) return <div className="app-shell"><main className="main-content"><div className="page-wrap"><div className="panel empty-inline">Checking secure Supabase session…</div></div></main></div>;
+  if (supabase && authLoading) return <div className="app-shell"><main className="main-content"><div className="page-wrap"><div className="workspace-loading" role="status" aria-live="polite"><span className="workspace-loading-spinner" aria-hidden="true" />Checking secure Supabase session…</div></div></main></div>;
   if (supabase && !authSession && !guestMode) return <AuthScreen onGuest={() => setGuestMode(true)} />;
 
   return <div className="app-shell">
@@ -267,7 +294,7 @@ export default function App() {
         </div>
       </div>
     </aside>
-    <Suspense fallback={<div className="main-content"><div className="page-wrap"><div className="panel empty-inline" role="status" aria-live="polite">Loading security console…</div></div></div>}>
+    <Suspense fallback={<div className="main-content"><div className="page-wrap"><div className="workspace-loading" role="status" aria-live="polite"><span className="workspace-loading-spinner" aria-hidden="true" />Loading selected workspace…</div><div className="workspace-loading-skeleton" aria-hidden="true"><i /><i /><i /></div></div></div>}>
     <main className="main-content">
       <header className="topbar">
         <button type="button" className="mobile-menu-btn" aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(v => !v)}>{mobileNavOpen ? <X size={18}/> : <Menu size={18}/>}</button>
@@ -328,12 +355,19 @@ export default function App() {
                 </div>
                 <input ref={inputRef} type="file" accept=".csv,text/csv" hidden onChange={e=>{inspectFile(e.target.files?.[0]); e.currentTarget.value="";}}/>
                 {!dataset ? (
-                  <button className="dropzone" onClick={()=>inputRef.current?.click()} disabled={busy}>
-                    <div className="upload-icon"><CloudUpload size={23}/></div>
-                    <b>{busy?"Inspecting CSV…":"Choose a CSV to inspect"}</b>
-                    <span>or <u>browse files</u> · CSV format</span>
-                    <small>Browser-only schema inspection · File is not uploaded to the backend</small>
-                  </button>
+                  <>
+                    <button className="dropzone" onClick={()=>inputRef.current?.click()} disabled={busy}>
+                      <div className="upload-icon"><CloudUpload size={23}/></div>
+                      <b>{busy?"Inspecting CSV…":"Choose a CSV to inspect"}</b>
+                      <span>or <u>browse files</u> · CSV format</span>
+                      <small>Browser-only schema inspection · File is not uploaded to the backend</small>
+                    </button>
+                    {busy && <div className="csv-processing" role="status" aria-live="polite" aria-atomic="true">
+                      <span className="csv-processing-spinner" aria-hidden="true" />
+                      <div><b>Inspecting CSV locally</b><span>{parsedRows === null ? "Starting background parser…" : parsedRows.toLocaleString() + " rows inspected so far · Counting labels in your browser"}</span></div>
+                      <div className="csv-processing-track indeterminate" aria-hidden="true"><i /></div>
+                    </div>}
+                  </>
                 ) : (
                   <div className="dataset-loaded">
                     <div className="file-line">
@@ -414,7 +448,8 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {history.length === 0 && <tr><td colSpan={6} className="empty-inline">{historyMessage || "No local replay runs recorded yet."}</td></tr>}
+                    {historyLoading && <tr><td colSpan={6} className="history-loading" role="status">Loading your private replay history…</td></tr>}
+                    {!historyLoading && history.length === 0 && <tr><td colSpan={6} className="empty-inline">{historyMessage || "No local replay runs recorded yet."}</td></tr>}
                     {history.map(row=>(
                       <tr key={row.run_id}>
                         <td>{row.dataset_name}</td>
