@@ -302,7 +302,7 @@ export default function App() {
         <div className="top-actions">
           <div className="env-pill"><span className="pulse-dot" /> OFFLINE REPLAY MODE</div>
           {guestMode && supabase && <button className="secondary-btn" onClick={() => setGuestMode(false)}>Sign in</button>}
-          <button className="icon-btn" title="Refresh API and replay status" onClick={() => { void checkHealth(); if (!guestMode) void loadOverview(); }}><RefreshCw size={16} /></button>
+          <button className="icon-btn" title="Refresh API, replay history and overview" onClick={() => { void checkHealth(); if (!guestMode) { void loadOverview(); void loadHistory(); } }}><RefreshCw size={16} /></button>
           <div className="top-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
         </div>
       </header>
