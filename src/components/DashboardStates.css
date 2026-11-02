@@ -1,0 +1,46 @@
+/* Dashboard loading and recovery states */
+.dashboard-skeleton {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(100, 116, 139, 0.2);
+}
+.dashboard-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.22), transparent);
+  animation: dashboardShimmer 1.45s ease-in-out infinite;
+}
+.dashboard-skeleton-value { width: 46%; height: 30px; margin: 8px 0 7px; }
+.dashboard-skeleton-detail { width: 78%; height: 11px; }
+@keyframes dashboardShimmer {
+  100% { transform: translateX(100%); }
+}
+.overview-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(13, 21, 38, 0.72);
+  color: var(--muted-light);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.overview-state-error {
+  border-color: rgba(251, 191, 36, 0.32);
+  color: #fcd9a0;
+}
+.overview-state .secondary-btn { flex: 0 0 auto; }
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-skeleton::after { animation: none; transform: none; opacity: 0; }
+}
+@media (max-width: 520px) {
+  .overview-state { align-items: flex-start; flex-direction: column; }
+}
