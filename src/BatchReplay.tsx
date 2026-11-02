@@ -19,9 +19,24 @@ type BatchResponse = {
   supabase_persistence?: { stored: boolean; rows?: number; reason?: string; flow_events?: { stored: boolean; rows?: number; reason?: string }; agent2_rows?: number };
 };
 
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_API_BATCH = 1000;
+const PARSE_CHUNK_BYTES = 256 * 1024;
+
+function emptySummary(): BatchResponse {
+  return {
+    total_analyzed: 0,
+    actions: { ALLOW: 0, BLOCK: 0, REVIEW: 0 },
+    results: [],
+    class_counts: {},
+    supabase_persistence: { stored: true, rows: 0 },
+  };
+}
+
 export function BatchReplay({ modelReady }: { modelReady: boolean }) {
   const [fileName, setFileName] = useState("");
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileReady, setFileReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [parsedRows, setParsedRows] = useState(0);
@@ -30,107 +45,207 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
   const [summary, setSummary] = useState<BatchResponse | null>(null);
 
   function selectFile(file?: File) {
-    if (!file) return;
+    if (!file || busy || parsing) return;
     setError("");
     setSummary(null);
-    setRows([]);
+    setSelectedFile(null);
+    setFileReady(false);
     setProgress(0);
     setParsedRows(0);
     setFileName(file.name);
+
     if (!file.name.toLowerCase().endsWith(".csv")) {
       setError("Choose a CSV file containing one network-flow record per row.");
       return;
     }
-    if (file.size > 100 * 1024 * 1024) {
+    if (file.size > MAX_FILE_BYTES) {
       setError("CSV exceeds the 100 MB browser replay limit.");
       return;
     }
+    if (file.size === 0) {
+      setError("The selected CSV file is empty.");
+      return;
+    }
+
+    setSelectedFile(file);
     setParsing(true);
-    const parsed: Record<string, unknown>[] = [];
+    let rowCount = 0;
     let parserErrorCount = 0;
+    let hasHeader = false;
+
+    // Pass one validates the local file without retaining parsed records.
     Papa.parse<Record<string, unknown>>(file, {
       header: true,
       dynamicTyping: true,
       skipEmptyLines: "greedy",
       worker: true,
       chunk: result => {
+        if (!hasHeader) hasHeader = Boolean(result.meta.fields?.length);
         for (const row of result.data) {
-          if (row && Object.keys(row).length > 0) parsed.push(row);
+          if (row && Object.keys(row).length > 0) rowCount += 1;
         }
         parserErrorCount += result.errors.length;
-        setParsedRows(parsed.length);
+        setParsedRows(rowCount);
       },
       complete: () => {
         setParsing(false);
-        if (!parsed.length) {
-          setError("The CSV contains no usable data rows.");
+        if (!hasHeader || rowCount === 0) {
+          setSelectedFile(null);
+          setError("The CSV must contain a header row and at least one non-empty data row.");
           return;
         }
-        if (parserErrorCount) {
-          setError("CSV parser reported " + parserErrorCount + " issue(s). Inspect the file before replay.");
+        if (parserErrorCount > 0) {
+          setSelectedFile(null);
+          setError("CSV parser reported " + parserErrorCount + " issue(s). Fix the file before replay.");
           return;
         }
-        setRows(parsed);
+        setFileReady(true);
       },
       error: reason => {
         setParsing(false);
+        setSelectedFile(null);
         setError(reason.message || "Could not parse the CSV file.");
       },
     });
   }
 
   async function replay() {
-    if (!rows.length || !modelReady) return;
+    if (!selectedFile || !fileReady || !modelReady || busy || parsing) return;
+
     const loadingStartedAt = Date.now();
+    const aggregate = emptySummary();
+    let finished = false;
+    let parsedDuringReplay = 0;
+
     setBusy(true);
     setError("");
     setSummary(null);
     setProgress(0);
-    const aggregate: BatchResponse = {
-      total_analyzed: 0,
-      actions: { ALLOW: 0, BLOCK: 0, REVIEW: 0 },
-      results: [],
-      class_counts: {},
-      supabase_persistence: { stored: true, rows: 0 },
+
+    const publishSummary = () => {
+      setSummary({
+        ...aggregate,
+        actions: { ...aggregate.actions },
+        results: [...aggregate.results],
+        class_counts: { ...aggregate.class_counts },
+        supabase_persistence: aggregate.supabase_persistence ? { ...aggregate.supabase_persistence } : undefined,
+      });
     };
-    try {
-      const chunkSize = 1000;
-      for (let offset = 0; offset < rows.length; offset += chunkSize) {
-        const chunk = rows.slice(offset, offset + chunkSize);
+
+    const finish = async (message?: string) => {
+      if (finished) return;
+      finished = true;
+      if (message) {
+        setError(message + (aggregate.total_analyzed > 0
+          ? " Completed " + aggregate.total_analyzed.toLocaleString() + " of " + parsedRows.toLocaleString() + " validated rows before stopping."
+          : ""));
+      }
+      publishSummary();
+      await holdLoaderForMinimum(loadingStartedAt);
+      setBusy(false);
+    };
+
+    const stop = (parser: Papa.Parser, message: string) => {
+      if (finished) return;
+      parser.abort();
+      void finish(message);
+    };
+
+    async function submitRows(chunkRows: Record<string, unknown>[]) {
+      for (let offset = 0; offset < chunkRows.length; offset += MAX_API_BATCH) {
+        const batch = chunkRows.slice(offset, offset + MAX_API_BATCH);
         const response = await apiFetch("/api/analyze/batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ flows: chunk }),
+          body: JSON.stringify({ flows: batch }),
         });
         const payload = await readApiPayload<Partial<BatchResponse> & { detail?: unknown }>(response);
         if (!response.ok) throw new Error(apiErrorMessage(payload, "Batch replay failed."));
-        if (!payload || typeof payload.total_analyzed !== "number" || !payload.actions || !Array.isArray(payload.results)) {
-          throw new Error("The batch API returned an incomplete response. No further rows were submitted.");
+        if (
+          !payload ||
+          payload.total_analyzed !== batch.length ||
+          !payload.actions ||
+          !Array.isArray(payload.results) ||
+          payload.results.length !== batch.length
+        ) {
+          throw new Error("The batch API returned an incomplete result. No further rows were submitted.");
         }
+        const actionCounts = payload.actions;
+        const actionTotal = Number(actionCounts.ALLOW) + Number(actionCounts.BLOCK) + Number(actionCounts.REVIEW);
+        if (
+          ![actionCounts.ALLOW, actionCounts.BLOCK, actionCounts.REVIEW].every(value => Number.isInteger(value) && value >= 0) ||
+          actionTotal !== batch.length
+        ) {
+          throw new Error("The batch API returned inconsistent action totals. No further rows were submitted.");
+        }
+
         aggregate.total_analyzed += payload.total_analyzed;
         const persistence = payload.supabase_persistence;
         if (!persistence?.stored) {
           aggregate.supabase_persistence = { stored: false, reason: persistence?.reason || "not_confirmed" };
         } else if (aggregate.supabase_persistence?.stored) {
-          aggregate.supabase_persistence.rows = Number(aggregate.supabase_persistence.rows || 0) + Number(persistence.flow_events?.rows || 0) + Number(persistence.agent2_rows || 0);
+          aggregate.supabase_persistence.rows =
+            Number(aggregate.supabase_persistence.rows || 0) +
+            Number(persistence.flow_events?.rows || 0) +
+            Number(persistence.agent2_rows || 0);
         }
         for (const action of ["ALLOW", "BLOCK", "REVIEW"] as const) {
-          aggregate.actions[action] += Number(payload.actions?.[action] || 0);
+          aggregate.actions[action] += actionCounts[action];
         }
-        for (const row of (payload.results || []) as ReplayRow[]) {
+        for (const row of payload.results as ReplayRow[]) {
           const className = row.final_class ?? "UNCONFIRMED";
           aggregate.class_counts[className] = (aggregate.class_counts[className] || 0) + 1;
           if (aggregate.results.length < 20) aggregate.results.push(row);
         }
-        setProgress(Math.min(rows.length, offset + chunk.length));
-        setSummary({ ...aggregate, results: [...aggregate.results], class_counts: { ...aggregate.class_counts } });
+        setProgress(aggregate.total_analyzed);
+        publishSummary();
       }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Batch replay stopped unexpectedly.");
-    } finally {
-      await holdLoaderForMinimum(loadingStartedAt);
-      setBusy(false);
     }
+
+    // Pass two streams bounded file chunks. Parsing pauses while each chunk is
+    // submitted, so raw CSV rows are never accumulated into a full-file array.
+    Papa.parse<Record<string, unknown>>(selectedFile, {
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: "greedy",
+      worker: false,
+      chunkSize: PARSE_CHUNK_BYTES,
+      chunk: (result, parser) => {
+        parser.pause();
+        if (result.errors.length > 0) {
+          stop(parser, "CSV parsing reported " + result.errors.length + " issue(s) during replay. Check the file and retry.");
+          return;
+        }
+        const chunkRows = result.data.filter(row => row && Object.keys(row).length > 0);
+        parsedDuringReplay += chunkRows.length;
+        if (chunkRows.length === 0) {
+          parser.resume();
+          return;
+        }
+        void submitRows(chunkRows)
+          .then(() => {
+            if (!finished) parser.resume();
+          })
+          .catch(reason => {
+            stop(parser, reason instanceof Error ? reason.message : "Batch replay stopped unexpectedly.");
+          });
+      },
+      complete: result => {
+        if (finished) return;
+        if (result.meta.aborted) {
+          void finish("Batch replay was stopped before the file was fully processed.");
+          return;
+        }
+        if (parsedDuringReplay !== parsedRows) {
+          void finish("The CSV changed between validation and replay; parsed row counts did not match. Select the file again.");
+          return;
+        }
+        void finish();
+      },
+      error: reason => {
+        void finish(reason.message || "Could not read the CSV during replay.");
+      },
+    });
   }
 
   const classes = summary?.class_counts ?? {};
@@ -138,26 +253,25 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
   return <section className="panel dataset-panel" style={{ marginBottom: 22 }}>
     <div className="panel-head">
       <div><div className="panel-kicker">OFFLINE DATASET REPLAY</div><h3>Batch flow analysis</h3>
-        <p>Load a real CSV and replay it through the trained agents in bounded batches. Flow records are processed in this browser session only.</p></div>
+        <p>Validate a real CSV, then stream it through the trained agents in bounded batches. Raw records remain in this browser session and are not uploaded as a file.</p></div>
       <span className="panel-icon"><FileSpreadsheet size={18}/></span>
     </div>
-    <label className="upload-zone" style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
-      <UploadCloud size={20}/><span><b>{fileName || "Choose a flow CSV"}</b><small>{rows.length ? rows.length.toLocaleString() + " rows parsed" : "CSV only · up to 100 MB"}</small></span>
+    <label className="upload-zone" style={{ display: "flex", alignItems: "center", gap: 12, cursor: busy || parsing ? "not-allowed" : "pointer" }}>
+      <UploadCloud size={20}/><span><b>{fileName || "Choose a flow CSV"}</b><small>{fileReady ? parsedRows.toLocaleString() + " rows validated · ready to replay" : "CSV only · up to 100 MB"}</small></span>
       <input type="file" accept=".csv,text/csv" disabled={parsing || busy} onChange={event => { selectFile(event.target.files?.[0]); event.currentTarget.value = ""; }} hidden />
     </label>
     {parsing && <div className="csv-processing" role="status" aria-live="polite" aria-atomic="true">
       <span className="csv-processing-spinner" aria-hidden="true" />
-      <div><b>Preparing replay dataset</b><span>{parsedRows.toLocaleString()} rows parsed in a background worker…</span></div>
+      <div><b>Validating CSV locally</b><span>{parsedRows.toLocaleString()} rows checked in a background worker…</span></div>
       <div className="csv-processing-track indeterminate" aria-hidden="true"><i /></div>
     </div>}
     <div className="panel-foot">
-      <span><Activity size={13}/> {progress.toLocaleString()} / {rows.length.toLocaleString()} rows processed</span>
-      <button className="primary-btn" disabled={!modelReady || !rows.length || busy || parsing} onClick={replay}>
+      <span><Activity size={13}/> {progress.toLocaleString()} / {parsedRows.toLocaleString()} rows processed</span>
+      <button className="primary-btn" disabled={!modelReady || !fileReady || busy || parsing} onClick={replay}>
         <Play size={14}/>{busy ? "Replaying…" : "Run batch replay"}
       </button>
     </div>
-    {rows.length > 0 && <div className="progress-track"><div className="progress-value" style={{ width: (progress / rows.length * 100) + "%" }}/></div>}
-    {busy && <InferenceLoader compact title="Running chronological batch inference" detail={`${progress.toLocaleString()} of ${rows.length.toLocaleString()} rows processed. The backend reports progress after each completed batch.`} />}
+    {busy && <InferenceLoader compact title="Streaming chronological batch inference" detail={progress.toLocaleString() + " of " + parsedRows.toLocaleString() + " validated rows completed. Each bounded batch is confirmed by the backend before the next is read."} />}
     {!modelReady && <div className="empty-inline">Batch inference remains disabled until both trained model artifacts are deployed and verified.</div>}
     {error && <div className="parse-warning" role="alert">{error}</div>}
     {summary && <div className="dataset-loaded" style={{ marginTop: 18 }}>
@@ -173,7 +287,7 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
         <tbody>{summary.results.slice(0, 20).map((row, index) => <tr key={index}><td>{index + 1}</td><td>{row.final_class ?? "Unconfirmed"}</td><td>{row.action}</td><td>{row.evidence_status}</td></tr>)}</tbody>
       </table></div>
       <div className="empty-inline" style={{ marginTop: 12 }}>Supabase audit: {summary.supabase_persistence?.stored ? `${Number(summary.supabase_persistence.rows || 0).toLocaleString()} derived flow events saved to your private account.` : `Cloud persistence was not confirmed (${summary.supabase_persistence?.reason || "not reported"}).`}</div>
-      <small>Showing the first 20 of {summary.total_analyzed.toLocaleString()} processed rows. Raw CSV data stays in this browser session; only derived analysis metadata is stored in Supabase.</small>
+      <small>Showing the first 20 of {summary.total_analyzed.toLocaleString()} processed rows. Only derived analysis metadata is stored in Supabase; raw CSV rows are streamed from the browser in bounded batches.</small>
     </div>}
   </section>;
 }
