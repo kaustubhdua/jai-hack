@@ -80,6 +80,13 @@ export default function App() {
         setGuestMode(!data.session);
         setAuthLoading(false);
       }
+    }).catch(() => {
+      if (active) {
+        // A failed local session lookup must not strand public visitors on a login screen.
+        setAuthSession(null);
+        setGuestMode(true);
+        setAuthLoading(false);
+      }
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setAuthSession(nextSession);
