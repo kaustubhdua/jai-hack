@@ -1,0 +1,87 @@
+name: Publish public benchmark model artifacts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-public-benchmark-models.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-public-benchmark-models
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download the verified main-branch benchmark artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cybersentinel-cicids2017-models-2bfb78e11647a375ce9b99fd69a05885a748420a
+          repository: ${{ github.repository }}
+          run-id: 43654575456
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .benchmark-artifact
+
+      - name: Verify model hashes and publish provenance
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import shutil
+          from pathlib import Path
+
+          root = Path(".benchmark-artifact")
+          manifest_path = root / "reports/generated/training_manifest.json"
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          if manifest.get("evaluation_data_used_for_training_or_calibration") is not False:
+              raise SystemExit("Refusing to publish models without the training/evaluation separation assertion.")
+
+          artifacts = {
+              "a1": root / "models/threat_detection/model.joblib",
+              "a2": root / "models/anomaly_detection/model.joblib",
+          }
+          for key, path in artifacts.items():
+              expected = manifest[key]["artifact_sha256"]
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected:
+                  raise SystemExit(f"{key} artifact hash mismatch: expected {expected}, got {actual}")
+
+          destinations = {
+              artifacts["a1"]: Path("models/threat_detection/model.joblib"),
+              artifacts["a2"]: Path("models/anomaly_detection/model.joblib"),
+              manifest_path: Path("models/provenance/cicids2017_training_manifest.json"),
+              root / "reports/generated/cic_ids2017_public_evaluation.json": Path("models/provenance/cicids2017_public_evaluation.json"),
+              root / "data/raw/public-benchmark/manifest.json": Path("models/provenance/cicids2017_dataset_manifest.json"),
+          }
+          for source, destination in destinations.items():
+              if not source.is_file():
+                  raise SystemExit(f"Required benchmark provenance file is missing: {source}")
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, destination)
+          print("Verified and staged both public CIC-IDS2017 model artifacts and provenance.")
+          PY
+
+      - name: Commit model artifacts without raw dataset files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add models/threat_detection/model.joblib models/anomaly_detection/model.joblib models/provenance/
+          if git diff --cached --quiet; then
+            echo "Verified benchmark artifacts are already current."
+          else
+            git commit -m "chore: publish verified CIC-IDS2017 benchmark models"
+            git push origin main
+          fi
