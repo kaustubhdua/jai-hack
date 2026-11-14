@@ -1,0 +1,74 @@
+name: Public CIC-IDS2017 benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_per_class:
+        description: Maximum number of rows retained per supported class
+        required: true
+        default: "50000"
+      estimators:
+        description: Random Forest tree count
+        required: true
+        default: "200"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train-and-evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project and ML dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,ml]"
+      - name: Download and prepare pinned CIC-IDS2017 public benchmark
+        run: |
+          python scripts/prepare_public_benchmark.py \
+            --output-dir data/raw/public-benchmark \
+            --max-per-class "${{ inputs.max_per_class }}" \
+            --seed 42
+      - name: Train both learned agents
+        run: |
+          python scripts/train_models.py \
+            --train data/raw/public-benchmark/training.parquet \
+            --label-column label \
+            --model-dir models \
+            --report-dir reports/generated \
+            --n-estimators "${{ inputs.estimators }}"
+      - name: Evaluate on untouched public benchmark holdout
+        run: |
+          python scripts/evaluate_benchmark.py \
+            --eval data/raw/public-benchmark/evaluation.parquet \
+            --threat-model models/threat_detection/model.joblib \
+            --anomaly-model models/anomaly_detection/model.joblib \
+            --output reports/generated/cic_ids2017_public_evaluation.json
+      - name: Run complete automated test suite
+        run: python -m pytest -q
+      - name: Upload trained models and provenance reports (never upload raw datasets)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cybersentinel-cicids2017-models-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            models/threat_detection/model.joblib
+            models/anomaly_detection/model.joblib
+            reports/generated/training_manifest.json
+            reports/generated/threat_detection_training.json
+            reports/generated/anomaly_training.json
+            reports/generated/cic_ids2017_public_evaluation.json
+            data/raw/public-benchmark/manifest.json
