@@ -1,0 +1,70 @@
+{
+  "training_source": "data/raw/public-benchmark/training.parquet",
+  "training_sha256": "3c117b0b5109bb1f04c5456cf8ab2db8bc2427bbc5df8183f0c038380b4a9973",
+  "training_rows": 170984,
+  "model_training_rows": 146558,
+  "model_fit_data_sha256": "0ff7b4f775755636e5e44c0a20ce7390e8a2f810f0e573bb95c108648f1b20a4",
+  "calibration_data_sha256": "603a40db8ade129f9b27f505c0426a36d7e92f1ac18a9326b2b702f4b2fc7457",
+  "label_column": "label",
+  "label_mapping": {
+    "PORT_SCAN": "PORT_SCAN",
+    "BENIGN": "BENIGN",
+    "DDOS": "DDOS",
+    "BRUTE_FORCE": "BRUTE_FORCE",
+    "DOS": "DOS"
+  },
+  "class_counts_training_partition": {
+    "BENIGN": 39991,
+    "BRUTE_FORCE": 11068,
+    "DDOS": 40000,
+    "DOS": 39933,
+    "PORT_SCAN": 39992
+  },
+  "class_counts_model_fit": {
+    "BENIGN": 34278,
+    "BRUTE_FORCE": 9487,
+    "DDOS": 34286,
+    "DOS": 34228,
+    "PORT_SCAN": 34279
+  },
+  "validation_source": "internal_stratified_holdout_from_training_partition",
+  "validation_path": null,
+  "validation_sha256": null,
+  "validation_rows": 24426,
+  "class_counts_validation": {
+    "BENIGN": 5713,
+    "BRUTE_FORCE": 1581,
+    "DDOS": 5714,
+    "DOS": 5705,
+    "PORT_SCAN": 5713
+  },
+  "calibration_fraction": 0.15,
+  "split_random_state": 42,
+  "a1": {
+    "artifact": "models/threat_detection/model.joblib",
+    "artifact_sha256": "3f419b27dcee2250284c65f1014a7b00d953bdd775304e9f7ce6df1981b51bc2",
+    "training_rows": 146558,
+    "confidence_calibrated": true
+  },
+  "a2": {
+    "artifact": "models/anomaly_detection/model.joblib",
+    "artifact_sha256": "42c395dad43b4dbdfda961120767ef3e4cca28345913ae756965cf3f2d21db09",
+    "training_rows": 34278,
+    "threshold_calibrated": true,
+    "threshold_selection_source": "internal_training_holdout",
+    "score_is_probability": false,
+    "score_range": [
+      0.0,
+      1.0
+    ],
+    "higher_score_means": "more anomalous"
+  },
+  "reports": {
+    "a1": "reports/generated/threat_detection_training.json",
+    "a2": "reports/generated/anomaly_training.json"
+  },
+  "evaluation_data_used_for_training_or_calibration": false,
+  "hidden_data_used_for_training_or_calibration": false,
+  "calibration_metrics_are_tuning_only": true,
+  "disclosure": "Calibration/threshold-selection metrics are tuning diagnostics, not an unbiased final estimate. The held-out evaluation partition and unlabelled hidden replay input are never used for fitting, calibration, or threshold selection."
+}

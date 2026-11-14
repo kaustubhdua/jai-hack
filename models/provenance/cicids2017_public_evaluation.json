@@ -1,0 +1,125 @@
+{
+  "evaluation_dataset": {
+    "path": "data/raw/public-benchmark/evaluation.parquet",
+    "rows": 42747,
+    "feature_count": 78,
+    "class_counts": {
+      "BENIGN": 9998,
+      "BRUTE_FORCE": 2767,
+      "DOS": 9984,
+      "DDOS": 10000,
+      "PORT_SCAN": 9998
+    },
+    "evaluation_only": true
+  },
+  "agent_1_threat_detection": {
+    "model_type": "random_forest",
+    "training_rows": 146558,
+    "accuracy": 0.9992280160011229,
+    "macro_precision": 0.9993395374005185,
+    "macro_recall": 0.9993395433702125,
+    "macro_f1": 0.9993395373844649,
+    "per_class": {
+      "BENIGN": {
+        "precision": 0.998499699939988,
+        "recall": 0.998499699939988,
+        "f1": 0.998499699939988,
+        "support": 9998
+      },
+      "BRUTE_FORCE": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 2767
+      },
+      "DOS": {
+        "precision": 0.9986980470706059,
+        "recall": 0.9987980769230769,
+        "f1": 0.9987480594922129,
+        "support": 9984
+      },
+      "DDOS": {
+        "precision": 0.9998999799959992,
+        "recall": 0.9997,
+        "f1": 0.9997999799979999,
+        "support": 10000
+      },
+      "PORT_SCAN": {
+        "precision": 0.9995999599959996,
+        "recall": 0.9996999399879976,
+        "f1": 0.9996499474921238,
+        "support": 9998
+      }
+    },
+    "confusion_matrix": [
+      [
+        9983,
+        0,
+        10,
+        1,
+        4
+      ],
+      [
+        0,
+        2767,
+        0,
+        0,
+        0
+      ],
+      [
+        12,
+        0,
+        9972,
+        0,
+        0
+      ],
+      [
+        3,
+        0,
+        0,
+        9997,
+        0
+      ],
+      [
+        0,
+        0,
+        3,
+        0,
+        9995
+      ]
+    ],
+    "class_order": [
+      "BENIGN",
+      "BRUTE_FORCE",
+      "DOS",
+      "DDOS",
+      "PORT_SCAN"
+    ],
+    "inference_seconds": 0.24013379600000917,
+    "inference_ms_per_flow": 0.0056175590333826745,
+    "confidence_note": "Maximum predict_proba; not probability-calibrated."
+  },
+  "agent_2_anomaly_detection": {
+    "algorithm": "IsolationForest",
+    "training_rows": 34278,
+    "threshold": 0.02798429201155389,
+    "benign_false_positive_rate": 0.017603520704140826,
+    "attack_anomaly_recall": 0.31326147363278267,
+    "inference_seconds": 1.312577470000008,
+    "inference_ms_per_flow": 0.030705721337170044
+  },
+  "agent_3_evidence_fusion_sample": {
+    "sample_size": 5000,
+    "actions": {
+      "ALLOW": 1158,
+      "BLOCK": 1202,
+      "REVIEW": 2640
+    },
+    "evidence_status": {
+      "AGREE": 2363,
+      "CONFLICT": 2637,
+      "UNCERTAIN": 0
+    },
+    "note": "Decision distribution only; not a standalone classification accuracy metric."
+  }
+}

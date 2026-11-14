@@ -1,0 +1,132 @@
+{
+  "source_repository": "https://huggingface.co/datasets/bvsam/cic-ids-2017",
+  "source_revision": "a6628f1c99a39fd23b614a2d926ed679c264dd9b",
+  "source_files": [
+    {
+      "path": "data/raw/public-benchmark/downloads/0000.parquet",
+      "bytes": 22188516,
+      "sha256": "022ab31ab239f07e11a6458ee771eea0317a001d68398242cb36f5a4be66f972",
+      "downloaded": true,
+      "source_url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/a6628f1c99a39fd23b614a2d926ed679c264dd9b/machine_learning/train/0000.parquet"
+    },
+    {
+      "path": "data/raw/public-benchmark/downloads/0001.parquet",
+      "bytes": 15688379,
+      "sha256": "a49a5f5230ef15fbd60079a93db12c5a549913dfed66a142592c27c7264b08d7",
+      "downloaded": true,
+      "source_url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/a6628f1c99a39fd23b614a2d926ed679c264dd9b/machine_learning/train/0001.parquet"
+    },
+    {
+      "path": "data/raw/public-benchmark/downloads/0002.parquet",
+      "bytes": 19352181,
+      "sha256": "e3cb0a243142fca1cfe0cd69437fa930a047f550c71353d34afbf618bd120427",
+      "downloaded": true,
+      "source_url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/a6628f1c99a39fd23b614a2d926ed679c264dd9b/machine_learning/train/0002.parquet"
+    },
+    {
+      "path": "data/raw/public-benchmark/downloads/0003.parquet",
+      "bytes": 57011041,
+      "sha256": "fd6f986b33712f1986e6057c60f88b729d6e39a93bd107a6b0a53ae33958a22e",
+      "downloaded": true,
+      "source_url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/a6628f1c99a39fd23b614a2d926ed679c264dd9b/machine_learning/train/0003.parquet"
+    },
+    {
+      "path": "data/raw/public-benchmark/downloads/0004.parquet",
+      "bytes": 24090104,
+      "sha256": "453bcb6400cf1cff4bd00404a3134f23e28b8541c7346566d984c733f3e62362",
+      "downloaded": true,
+      "source_url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/a6628f1c99a39fd23b614a2d926ed679c264dd9b/machine_learning/train/0004.parquet"
+    },
+    {
+      "path": "data/raw/public-benchmark/downloads/0005.parquet",
+      "bytes": 17249369,
+      "sha256": "86ccdefdcd9c85e5d8fa159412d7402a66e97b9d9453c17de0156ac0c6999cc7",
+      "downloaded": true,
+      "source_url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/a6628f1c99a39fd23b614a2d926ed679c264dd9b/machine_learning/train/0005.parquet"
+    },
+    {
+      "path": "data/raw/public-benchmark/downloads/0006.parquet",
+      "bytes": 45553171,
+      "sha256": "9fda00044283648f09ce6257a6bddc39c4e3a967d7a609ff808247727a4fcabb",
+      "downloaded": true,
+      "source_url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/a6628f1c99a39fd23b614a2d926ed679c264dd9b/machine_learning/train/0006.parquet"
+    },
+    {
+      "path": "data/raw/public-benchmark/downloads/0007.parquet",
+      "bytes": 67414946,
+      "sha256": "3dd43daf2148052d76c2b8daa742a911e066c4d3cd4ba4ce933e53ccd1544592",
+      "downloaded": true,
+      "source_url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/a6628f1c99a39fd23b614a2d926ed679c264dd9b/machine_learning/train/0007.parquet"
+    }
+  ],
+  "paper_citation": "Iman Sharafaldin, Arash Habibi Lashkari, and Ali A. Ghorbani, Toward Generating a New Intrusion Detection Dataset and Intrusion Traffic Characterization, ICISSP 2018.",
+  "license_note": "The original CIC-IDS2017 publisher describes the CSV dataset as publicly available for researchers and requests citation. Verify the publisher's current terms before any commercial use or redistribution.",
+  "label_mapping": {
+    "benign": "BENIGN",
+    "ftp-patator": "BRUTE_FORCE",
+    "ssh-patator": "BRUTE_FORCE",
+    "dos hulk": "DOS",
+    "dos goldeneye": "DOS",
+    "dos slowloris": "DOS",
+    "dos slowhttptest": "DOS",
+    "ddos": "DDOS",
+    "portscan": "PORT_SCAN"
+  },
+  "excluded_raw_label_counts": {
+    "Bot": 1966,
+    "Heartbleed": 11,
+    "Infiltration": 36,
+    "Web Attack \ufffd Brute Force": 1507,
+    "Web Attack \ufffd Sql Injection": 21,
+    "Web Attack \ufffd XSS": 652
+  },
+  "raw_label_counts": {
+    "BENIGN": 2273097,
+    "Bot": 1966,
+    "DDoS": 128027,
+    "DoS GoldenEye": 10293,
+    "DoS Hulk": 231073,
+    "DoS Slowhttptest": 5499,
+    "DoS slowloris": 5796,
+    "FTP-Patator": 7938,
+    "Heartbleed": 11,
+    "Infiltration": 36,
+    "PortScan": 158930,
+    "SSH-Patator": 5897,
+    "Web Attack \ufffd Brute Force": 1507,
+    "Web Attack \ufffd Sql Injection": 21,
+    "Web Attack \ufffd XSS": 652
+  },
+  "max_rows_per_canonical_class": 50000,
+  "selected_rows_after_ambiguous_duplicate_removal": 213731,
+  "ambiguous_conflicting_duplicate_rows_removed": 104,
+  "training_rows": 170984,
+  "evaluation_rows": 42747,
+  "training_class_counts": {
+    "BENIGN": 39991,
+    "BRUTE_FORCE": 11068,
+    "DDOS": 40000,
+    "DOS": 39933,
+    "PORT_SCAN": 39992
+  },
+  "evaluation_class_counts": {
+    "BENIGN": 9998,
+    "BRUTE_FORCE": 2767,
+    "DDOS": 10000,
+    "DOS": 9984,
+    "PORT_SCAN": 9998
+  },
+  "split": "5-fold StratifiedGroupKFold; exact numeric feature vectors kept in one partition",
+  "seed": 42,
+  "official_challenge_data_used": false,
+  "hidden_challenge_data_used": false,
+  "benchmark_disclosure": "CIC-IDS2017 is an external public engineering benchmark, not the JAI organizer dataset. Its class mapping is a documented subset; unsupported attack families are excluded and listed. Results must not be described as official challenge scores.",
+  "training_file": {
+    "path": "data/raw/public-benchmark/training.parquet",
+    "sha256": "3c117b0b5109bb1f04c5456cf8ab2db8bc2427bbc5df8183f0c038380b4a9973"
+  },
+  "evaluation_file": {
+    "path": "data/raw/public-benchmark/evaluation.parquet",
+    "sha256": "8aeae018616f5aa72e178bd0b9c7938ccbea43209cb125808019a301c805219f"
+  }
+}
