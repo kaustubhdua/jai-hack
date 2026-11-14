@@ -1,10 +1,12 @@
-# Deployed model artifact provenance
+# Public benchmark model artifact provenance
 
-## What is deployed
+## What is checked in
 
-The checked-in model artifacts are reproducible **public CIC-IDS2017 engineering baselines**. They are not trained on the JAI organizer's private training pack, are not validated against the organizer's hidden replay pack, and must not be described as official challenge models or official JAI scores.
+The repository tracks reproducible **public CIC-IDS2017 engineering baselines**. They are not trained on the JAI organizer's private training pack, are not validated against the organizer's hidden replay pack, and must not be described as official challenge models or official JAI scores.
 
 The artifacts are published from GitHub Actions run [43654575456](https://github.com/kaustubhdua/jai-hack/actions/runs/43654575456), which trains and evaluates the models on the pinned public benchmark. The publish workflow verifies the SHA-256 values in the training manifest before copying either model into the runtime paths.
+
+A checked-in model is not proof that the current Vercel production deployment contains it. The production release remains a separate gate: deploy a commit containing these artifacts, then verify model readiness and the public health endpoint before promoting the production aliases.
 
 ## Evidence and limitations
 
