@@ -8,6 +8,7 @@ from api import index
 
 def test_private_history_requires_supabase_auth_when_configured(monkeypatch):
     monkeypatch.setattr(index, "_supabase_public_key", lambda: "sb_publishable_test")
+    monkeypatch.setattr(index, "_supabase_project_host", lambda: "test-project.supabase.co")
     monkeypatch.setattr(index, "_supabase_user_id", lambda request: (None, "not_authenticated"))
 
     response = TestClient(index.app).get("/api/history")
@@ -184,3 +185,22 @@ def test_supabase_persistence_requires_both_url_and_public_key(monkeypatch):
 
     monkeypatch.delenv("VITE_SUPABASE_URL")
     assert index._supabase_persistence_configured() is False
+
+
+
+def test_missing_supabase_url_keeps_local_runtime_unauthenticated(monkeypatch):
+    monkeypatch.setattr(index, "_supabase_public_key", lambda: "sb_publishable_test")
+    monkeypatch.setattr(index, "_supabase_project_host", lambda: None)
+    request = Request({
+        "type": "http",
+        "headers": [],
+        "method": "GET",
+        "path": "/api/history",
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("testclient", 123),
+        "scheme": "http",
+        "http_version": "1.1",
+    })
+
+    assert index._require_authenticated_user(request) is None
