@@ -25,7 +25,7 @@ permissions:
 
 concurrency:
   group: public-benchmark-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   train-and-evaluate:
