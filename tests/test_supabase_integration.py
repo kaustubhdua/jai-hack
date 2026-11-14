@@ -177,6 +177,7 @@ def test_supabase_project_host_uses_environment_and_rejects_insecure_urls(monkey
 
 
 def test_supabase_persistence_requires_both_url_and_public_key(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.setenv("VITE_SUPABASE_URL", "https://new-project.supabase.co")
     monkeypatch.setenv("VITE_SUPABASE_ANON_KEY", "sb_publishable_test")
     assert index._supabase_persistence_configured() is True
