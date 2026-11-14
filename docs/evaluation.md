@@ -84,3 +84,8 @@ A limited `--limit` run is a smoke test only and cannot be submitted. The hidden
 ## Artifact hygiene
 
 Organizer data, fitted model binaries, reports, generated CSVs, and local databases are excluded from Git. Do not commit them unless organizers explicitly authorize publication. Preserve local SHA-256 hashes, code revision, training provenance, and validation report for reproducibility.
+
+
+## Agent 2 threshold selection
+
+The optional `--calibrate-anomaly-threshold` flag selects Agent 2's operating threshold on the separate labelled calibration partition: the internal group-isolated holdout from the training partition by default, or an external `--validation` file when supplied. This partition is not used to fit either model, and the held-out evaluation partition and unlabelled hidden replay input remain untouched. If the calibration fraction is disabled, external labelled validation is required for this option.

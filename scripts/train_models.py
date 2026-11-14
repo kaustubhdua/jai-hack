@@ -63,8 +63,8 @@ def train_models(
         raise FileNotFoundError(f"Training partition not found: {training_path}")
     if not 0.0 <= calibration_fraction < 0.5:
         raise ValueError("calibration_fraction must be in [0, 0.5).")
-    if calibrate_anomaly_threshold and validation_path is None:
-        raise ValueError("Label-based A2 threshold calibration requires a separate organizer-provided --validation file.")
+    if calibrate_anomaly_threshold and validation_path is None and calibration_fraction == 0:
+        raise ValueError("A2 threshold calibration requires a labelled holdout; keep the internal training holdout enabled or provide --validation.")
     if validation_path is None and calibration_fraction == 0:
         validation_source = None
     elif validation_path is not None:
@@ -219,7 +219,11 @@ def train_models(
             "artifact_sha256": _sha256(a2_path),
             "training_rows": anomaly.metadata.get("training_rows"),
             "threshold_calibrated": anomaly_report.get("threshold_calibration") is not None,
-            "threshold_selection_source": "organizer_labelled_validation" if anomaly_report.get("threshold_calibration") is not None else "benign_training_distribution",
+            "threshold_selection_source": (
+                "organizer_provided_labelled_validation" if validation_path is not None else
+                "internal_training_holdout" if anomaly_report.get("threshold_calibration") is not None else
+                "benign_training_distribution"
+            ),
             "score_is_probability": False,
             "score_range": [0.0, 1.0],
             "higher_score_means": "more anomalous",
@@ -246,7 +250,7 @@ def main() -> None:
     parser.add_argument("--backend", choices=["random_forest", "xgboost"], default="random_forest")
     parser.add_argument("--n-estimators", type=int, default=400)
     parser.add_argument("--max-benign-fpr", type=float, default=0.02)
-    parser.add_argument("--calibrate-anomaly-threshold", action="store_true", help="Use labels from a separate organizer-provided --validation file to tune A2 threshold; disabled by default.")
+    parser.add_argument("--calibrate-anomaly-threshold", action="store_true", help="Tune A2 threshold on the separate labelled calibration holdout (internal training-only holdout by default, or --validation if supplied); disabled by default.")
     parser.add_argument("--model-dir", type=Path, default=Path("models"))
     parser.add_argument("--report-dir", type=Path, default=Path("reports/generated"))
     args = parser.parse_args()
