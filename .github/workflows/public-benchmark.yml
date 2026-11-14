@@ -1,6 +1,8 @@
 name: Public CIC-IDS2017 benchmark
 
 on:
+  push:
+    branches: [feat/open-source-benchmark-bootstrap]
   workflow_dispatch:
     inputs:
       max_per_class:
