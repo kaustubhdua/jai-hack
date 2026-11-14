@@ -1,18 +1,33 @@
 # Supabase integration
 
-CyberSentinel uses Supabase Auth and Postgres for user-scoped audit metadata. Network-flow CSVs and raw flow feature payloads remain in the local replay workspace; they are not uploaded to Supabase.
+CyberSentinel uses the shared Supabase project `common 1` for Auth and Postgres audit metadata. Its application tables live only in the dedicated `cybersentinel` schema. Existing `bharatsim`, `genomeguard`, and `public` objects are not modified. Network-flow CSVs, raw flow feature payloads, trained model files, and hidden replay inputs remain outside Postgres.
 
 ## Runtime configuration
 
 Set these Vercel environment variables for Production, Preview and Development:
 
-- `VITE_SUPABASE_URL`: the Supabase project URL used by the browser client.
-- `VITE_SUPABASE_ANON_KEY`: the project's publishable key (the variable name is retained for compatibility; the value may use the `sb_publishable_` format).
-- `SUPABASE_URL` and `SUPABASE_ANON_KEY`: optional backend aliases. If omitted, the Python API falls back to the corresponding `VITE_*` variables. The backend derives its HTTPS host from the configured URL; it is not pinned to a particular project ref.
+- `VITE_SUPABASE_URL`: the `common 1` project URL used by the browser Auth client.
+- `VITE_SUPABASE_ANON_KEY`: the `common 1` publishable key (the variable name is retained for compatibility; the value may use the `sb_publishable_` format).
+- `SUPABASE_URL`: optional backend alias. If omitted, the Python API falls back to `VITE_SUPABASE_URL`.
+- `SUPABASE_ANON_KEY`: optional backend alias. If omitted, the Python API falls back to `VITE_SUPABASE_ANON_KEY`.
 
-The publishable key is public by design. RLS and the authenticated user's JWT enforce data ownership. Do not put a Supabase secret/service-role key in a `VITE_` or `NEXT_PUBLIC_` variable. The API forwards the user's bearer token to Supabase and resolves the user through Auth before writing.
+The API derives its HTTPS host from the configured URL; it is not pinned to a project ref. The browser key is public by design. RLS and the authenticated user's JWT enforce row ownership. Do not put a Supabase secret/service-role key in a `VITE_` or `NEXT_PUBLIC_` variable. The API forwards the user's bearer token to Supabase Auth and resolves the user before writing.
+
+## Shared-project isolation
+
+All CyberSentinel PostgREST reads and writes explicitly select the `cybersentinel` schema using `Accept-Profile` and `Content-Profile` headers. The schema is added to the PostgREST exposed-schema configuration without removing the existing `public`, `graphql_public`, or `storage` schemas.
+
+The shared project's existing schemas are preserved:
+
+- `bharatsim`: existing BharatSim tables and data.
+- `genomeguard`: existing GenomeGuard tables and data.
+- `public`: existing shared deployment-status object and Supabase-managed public objects.
+
+CyberSentinel does not create tables in `public`, alter the other application schemas, or change the shared Auth users. RLS scopes every CyberSentinel row to `auth.uid() = user_id`.
 
 ## Persisted data
+
+All following tables are in `cybersentinel`:
 
 - `agent2_inference_events`: Agent 2 anomaly score, flag, model metadata and derived evidence.
 - `flow_analysis_events`: single-flow, batch, fusion and policy-simulation outcomes.
@@ -20,38 +35,36 @@ The publishable key is public by design. RLS and the authenticated user's JWT en
 - `replay_decisions`: per-record predicted class, anomaly index, evidence status and ALLOW/BLOCK result.
 - `replay_policies`: per-run adaptive policy scope and activation/expiry record IDs.
 - `replay_correlation_groups`: Agent 4 correlation groups, observed record membership and supporting evidence for each replay run.
-- `analysis_runs`: evaluation-run summary schema retained for the evaluation workflow.
+- `analysis_runs`: evaluation-run summary metadata.
 
-All user-owned tables use RLS with `auth.uid() = user_id`. The browser can only read and insert its own rows. The server verifies the bearer token with Supabase Auth; client-supplied user IDs are never trusted.
+Raw network-flow rows and challenge datasets are never uploaded. The browser/authenticated role receives only SELECT and INSERT privileges; RLS limits both to the caller's own rows. No anonymous table privileges are granted.
 
 ## Migration history
 
-The live Supabase project records the following versions. The corresponding versioned files are the canonical migrations:
+The shared-project bootstrap is kept separate from Supabase's global migration history because that ledger is already used by other applications in `common 1`.
 
-- `20261031073431_add_user_scoped_cybersentinel_audit.sql`
-- `20261031074022_tighten_user_audit_table_grants.sql`
-- `20261031074154_persist_replay_decisions_policies_and_simulation_events.sql`
-- `20261031074806_tighten_analysis_run_snapshot_permissions.sql`
-- `20261031075817_index_agent2_user_id.sql`
-- `20261031080141_persist_replay_correlation_groups.sql`
-- `20261114194548_lock_down_public_default_privileges.sql`
-- `20261114194635_revoke_public_function_execute.sql`
+- Canonical shared-schema migration: `database/cybersentinel/001_init.sql`.
+- Project-local ledger: `cybersentinel.schema_migrations`.
+- Current version: `20261115120000`.
 
-Earlier timestamp-named placeholder files are retained as no-ops so older checkouts do not replay already-applied schema changes. The latest migrations revoke automatic default table and sequence privileges from API roles, and revoke both per-schema and global default function execution. New public objects must opt in through explicit grants and RLS.
+The older `supabase/migrations/` files describe the retired, dedicated `jai-hack` project schema and remain as historical migration records. Do not apply those public-schema migrations to `common 1`; use the isolated `database/cybersentinel/` migration instead.
 
 ## Smoke-test checklist
 
-1. Sign in through the Supabase Auth gate.
-2. Run Agent 2 independent scoring and verify an `agent2_inference_events` row for the signed-in user.
-3. Run single-flow and batch analysis and verify `flow_analysis_events`.
-4. Run chronological replay and verify `replay_runs`, `replay_decisions`, `replay_policies` and `replay_correlation_groups`.
-5. Sign in as another user and verify that the first user's rows are not visible.
+1. Sign in through the Supabase Auth gate on `common 1`.
+2. Run Agent 2 independent scoring and verify an `agent2_inference_events` row in `cybersentinel` for the signed-in user.
+3. Run single-flow and batch analysis and verify `cybersentinel.flow_analysis_events`.
+4. Run chronological replay and verify `cybersentinel.replay_runs`, `replay_decisions`, `replay_policies`, and `replay_correlation_groups`.
+5. Sign in as a second user and verify that the first user's rows are not visible.
 6. Confirm unauthenticated requests to operational API routes receive HTTP 401.
+7. Confirm the existing `bharatsim`, `genomeguard`, and `public.genomeguard_deployment_status` objects remain unchanged.
 
-A successful build alone does not complete this smoke test. The deployed app must be exercised with a real authenticated session and the organizer's real replay input.
+A successful build alone does not complete this smoke test. The deployed app must be exercised with real authenticated sessions and the organizer's real replay input.
 
 ## Evaluation snapshots
-The Model Intelligence view can save a compact evaluation snapshot to `analysis_runs`. It stores metrics and report metadata only; evaluation CSVs and hidden replay data are not uploaded. The Audit History view shows replay runs and evaluation snapshots separately.
+
+The Model Intelligence view can save a compact evaluation snapshot to `cybersentinel.analysis_runs`. It stores metrics and report metadata only; evaluation CSVs and hidden replay data are not uploaded. The Audit History view shows replay runs and evaluation snapshots separately.
 
 ## Database performance
-The user ownership foreign key on `agent2_inference_events.user_id` is indexed to keep per-user audit reads and cascading deletes efficient.
+
+The user ownership foreign key on `cybersentinel.agent2_inference_events.user_id` is indexed to keep per-user audit reads and cascading deletes efficient.

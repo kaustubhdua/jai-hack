@@ -52,6 +52,8 @@ The React app creates a Supabase client from VITE_SUPABASE_URL and VITE_SUPABASE
 
 The API explicitly requires an authenticated user for private history and overview data, inference, replay, evaluation snapshots, submission downloads, system diagnostics, policy, and correlation operations. Keep those checks in the backend even when the corresponding controls are hidden from guest users. The anonymous role must not gain access to private history tables; keep RLS enabled and verify ownership isolation with separate test users before production use.
 
+The shared Supabase project `common 1` is the active Auth and Postgres backend. CyberSentinel stores hosted replay summaries and derived audit records only in its isolated `cybersentinel` schema, selected explicitly with PostgREST profile headers. The existing `bharatsim`, `genomeguard`, and `public` schemas are not modified. The old dedicated `jai-hack` Supabase project is paused and retained as a rollback source; it is not the configured runtime backend.
+
 Supabase is the durable store for hosted replay summaries and derived audit records, but it is not a substitute for durable job/artifact infrastructure. Vercel's filesystem remains ephemeral; official hidden replay input, trained model artifacts, and generated submission files are not provisioned by a standard Git deployment. Do not claim hosted official replay or full model-backed readiness until those artifact paths are separately provisioned and tested.
 
 ## Readiness checks
