@@ -286,8 +286,16 @@ def _supabase_project_host() -> str | None:
 
 
 def _require_authenticated_user(request: Request) -> str | None:
-    """Require a valid Supabase user only when URL and public key are both configured."""
+    """Require Supabase identity for every hosted request; keep local development optional."""
     if not _supabase_persistence_configured():
+        if SERVERLESS_RUNTIME:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "SUPABASE_NOT_CONFIGURED",
+                    "message": "Hosted private routes are disabled until Supabase URL and publishable key are configured.",
+                },
+            )
         return None
     user_id, error = _supabase_user_id(request)
     if not user_id:
@@ -675,23 +683,29 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
         for group in engine.correlation_agent.active_groups.values()
     ]
 
-    # Save to local SQLite
+    # Hosted runs must use Supabase as the durable source of truth. SQLite is
+    # retained only for local development and is never written on Vercel.
     run_id = f"RUN-{time.time_ns()}"
     metrics = results["metrics"]
-    record_run(
-        run_id=run_id,
-        dataset_name=payload.dataset_name,
-        total_records=metrics["total_records"],
-        blocked_records=metrics["blocked_records"],
-        allowed_records=metrics["allowed_records"],
-        policies_created=metrics["policies_created"],
-        containment_rate=metrics["containment_rate"],
-        throughput_fps=metrics["throughput_fps"],
-        elapsed_seconds=metrics["elapsed_seconds"],
-        status="COMPLETED",
-    )
+    if not SERVERLESS_RUNTIME:
+        record_run(
+            run_id=run_id,
+            dataset_name=payload.dataset_name,
+            total_records=metrics["total_records"],
+            blocked_records=metrics["blocked_records"],
+            allowed_records=metrics["allowed_records"],
+            policies_created=metrics["policies_created"],
+            containment_rate=metrics["containment_rate"],
+            throughput_fps=metrics["throughput_fps"],
+            elapsed_seconds=metrics["elapsed_seconds"],
+            status="COMPLETED",
+        )
     cloud_persistence = _persist_replay_run(run_id, payload.dataset_name, metrics, "COMPLETED", request, {"mode": "supplied_batch_replay"})
-    artifact_persistence = _persist_replay_artifacts(results, run_id, request, _LAST_CORRELATION_GROUPS)
+    artifact_persistence = (
+        _persist_replay_artifacts(results, run_id, request, _LAST_CORRELATION_GROUPS)
+        if cloud_persistence.get("stored")
+        else {"stored": False, "reason": "replay_run_not_persisted"}
+    )
     cloud_persistence["artifacts"] = artifact_persistence
 
     return {
@@ -709,7 +723,10 @@ def run_official_replay(request: Request):
     """Run the installed official evaluation stream and write the three submission CSVs."""
     _require_authenticated_user(request)
     if SERVERLESS_RUNTIME:
-        raise HTTPException(status_code=503, detail={"code": "LOCAL_RUNTIME_REQUIRED", "message": "Replay execution and local SQLite history require the local Python runtime; serverless previews are read-only."})
+        raise HTTPException(status_code=503, detail={
+            "code": "OFFICIAL_REPLAY_REQUIRES_ARTIFACT_STORAGE",
+            "message": "Official replay is not enabled in the hosted runtime until verified model/input artifacts and durable submission storage are provisioned. Use the reproducible offline runner; hosted audit history remains in Supabase.",
+        })
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -764,26 +781,31 @@ def run_official_replay(request: Request):
         ]
 
         metrics = results["metrics"]
-        run_id = f"RUN-{int(time.time())}"
-        record_run(
-            run_id=run_id,
-            dataset_name=eval_file.name,
-            total_records=metrics["total_records"],
-            blocked_records=metrics["blocked_records"],
-            allowed_records=metrics["allowed_records"],
-            policies_created=metrics["policies_created"],
-            containment_rate=metrics.get("containment_rate"),
-            throughput_fps=metrics["throughput_fps"],
-            elapsed_seconds=metrics["elapsed_seconds"],
-            status="COMPLETED" if validation.get("all_valid") else "VALIDATION_FAILED",
-        )
+        run_id = f"RUN-{time.time_ns()}"
+        if not SERVERLESS_RUNTIME:
+            record_run(
+                run_id=run_id,
+                dataset_name=eval_file.name,
+                total_records=metrics["total_records"],
+                blocked_records=metrics["blocked_records"],
+                allowed_records=metrics["allowed_records"],
+                policies_created=metrics["policies_created"],
+                containment_rate=metrics.get("containment_rate"),
+                throughput_fps=metrics["throughput_fps"],
+                elapsed_seconds=metrics["elapsed_seconds"],
+                status="COMPLETED" if validation.get("all_valid") else "VALIDATION_FAILED",
+            )
         cloud_persistence = _persist_replay_run(
             run_id, eval_file.name, metrics,
             "COMPLETED" if validation.get("all_valid") else "VALIDATION_FAILED",
             request,
             {"mode": "official_hidden_replay", "validation_passed": bool(validation.get("all_valid")), "correlation_groups": len(_LAST_CORRELATION_GROUPS)},
         )
-        artifact_persistence = _persist_replay_artifacts(results, run_id, request)
+        artifact_persistence = (
+            _persist_replay_artifacts(results, run_id, request, _LAST_CORRELATION_GROUPS)
+            if cloud_persistence.get("stored")
+            else {"stored": False, "reason": "replay_run_not_persisted"}
+        )
         cloud_persistence["artifacts"] = artifact_persistence
         summary = {
             "run_id": run_id,
