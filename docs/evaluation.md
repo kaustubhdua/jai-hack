@@ -45,7 +45,7 @@ python scripts/evaluate_benchmark.py \
   --output reports/generated/official_evaluation.json
 ```
 
-This command loads existing artifacts and scores the labelled evaluation partition. It does not fit, calibrate, or select thresholds. Treat its output as the current evaluation only when it was produced by the exact current code revision and verified input hashes. Include the 8.58% repeated-feature overlap caveat.
+This command loads existing artifacts and scores the labelled evaluation partition. It does not fit, calibrate, or select thresholds. Treat its output as the current evaluation only when it was produced by the exact current code revision and verified input hashes. Include the 8.58% repeated-feature overlap caveat. The hosted `/api/benchmarks` endpoint reads only `reports/generated/official_evaluation.json`; historical files under `release/` are never promoted as current results.
 
 ## 4. Run the extended five-agent evaluation suite (optional)
 
