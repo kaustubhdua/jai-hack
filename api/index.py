@@ -286,8 +286,8 @@ def _supabase_project_host() -> str | None:
 
 
 def _require_authenticated_user(request: Request) -> str | None:
-    """Require a valid Supabase user for operational routes in configured deployments."""
-    if not _supabase_public_key():
+    """Require a valid Supabase user only when URL and public key are both configured."""
+    if not _supabase_persistence_configured():
         return None
     user_id, error = _supabase_user_id(request)
     if not user_id:
