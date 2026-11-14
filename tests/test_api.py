@@ -48,6 +48,14 @@ def test_system_diagnostics_requires_auth_when_supabase_is_configured(monkeypatc
     assert response.json()["detail"]["code"] == "AUTH_REQUIRED"
 
 
+def test_vercel_rewrite_routes_api_subpaths_to_central_app():
+    response = TestClient(index.app).get("/api?__vercel_path=models/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "agents" in payload
+    assert payload["status"] in {"ready", "not_ready"}
+
+
 def test_health_does_not_claim_models_ready_without_artifacts(monkeypatch, tmp_path):
     monkeypatch.setattr(index, "THREAT_MODEL", tmp_path / "missing-threat.joblib")
     monkeypatch.setattr(index, "ANOMALY_MODEL", tmp_path / "missing-anomaly.joblib")
