@@ -1047,11 +1047,11 @@ def get_benchmarks():
     """Return only metrics loaded from a generated benchmark report."""
     import json
 
-    candidates = (
-        BASE_DIR / "outputs" / "reports" / "eval_benchmark_report.json",
-        BASE_DIR / "release" / "day2-final" / "eval_benchmark_report.json",
-    )
-    report_file = next((path for path in candidates if path.is_file()), None)
+    # Only the canonical current evaluation output is eligible. Historical
+    # release archives are deliberately excluded from live benchmark claims.
+    report_file = BASE_DIR / "reports" / "generated" / "official_evaluation.json"
+    if not report_file.is_file():
+        report_file = None
     if report_file is None:
         raise HTTPException(
             status_code=503,
