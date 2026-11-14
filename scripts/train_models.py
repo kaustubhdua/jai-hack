@@ -6,7 +6,13 @@ import argparse
 import hashlib
 import json
 import tempfile
+import sys
 from pathlib import Path
+
+# Support both `python scripts/train_models.py` and `python -m scripts.train_models`.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 import pandas as pd
 from sklearn.model_selection import StratifiedGroupKFold
