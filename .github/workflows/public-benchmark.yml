@@ -56,7 +56,9 @@ jobs:
             --label-column label \
             --model-dir models \
             --report-dir reports/generated \
-            --n-estimators "${{ inputs.estimators || 200 }}" \\\n            --calibrate-anomaly-threshold \\\n            --max-benign-fpr 0.02
+            --n-estimators "${{ inputs.estimators || 200 }}" \
+            --calibrate-anomaly-threshold \
+            --max-benign-fpr 0.02
       - name: Evaluate on untouched public benchmark holdout
         run: |
           python scripts/evaluate_benchmark.py \
