@@ -27,8 +27,9 @@ Important limitations:
 
 - `data/processed/*` and `models/*` are intentionally ignored by Git. A standard Git-triggered Vercel deployment therefore does not contain the organiser evaluation dataset or fitted model artifacts.
 - Without both model files, `/api/health` reports `model_ready: false` and inference endpoints return `503 MODEL_NOT_READY`. The UI can load while the model-backed product workflow remains unavailable.
+- `POST /api/replay/run-official` remains disabled in the serverless runtime until verified model/input artifacts and durable submission-file storage are provisioned. Run the official challenge workflow with the documented offline runner; hosted audit history is still persisted to Supabase.
 - `POST /api/replay/run-official` is a synchronous request. The current `vercel.json` config sets Python functions under `api/*.py` and `api/**/*.py` to `maxDuration: 300` seconds. This is a platform execution ceiling, not proof that a full hidden replay fits within it; run the official replay locally unless a separately tested background-job/artifact architecture is implemented.
-- The backend stores run history in local SQLite (`data/cybersentinel_history.db`). Serverless filesystem state is not a durable shared database across invocations or instances.
+- Local/offline runs also maintain a local SQLite convenience history (`data/cybersentinel_history.db`). On Vercel, `/api/replay/simulate` does not write SQLite: it stores run summaries, decisions, policies, and correlation groups in Supabase Postgres using the caller's JWT and RLS. Raw flow records and model artifacts are not stored in Postgres.
 - Preview deployments are protected by Vercel SSO in the current project configuration, so external browser QA requires an authorised session.
 
 Do not describe the Vercel deployment as a verified production SOC service until model/data provisioning, durable run storage, full replay execution, API routes, and browser workflows have been tested end-to-end in that environment.
