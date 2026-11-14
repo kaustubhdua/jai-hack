@@ -52,7 +52,7 @@ The React app creates a Supabase client from VITE_SUPABASE_URL and VITE_SUPABASE
 
 The API explicitly requires an authenticated user for private history and overview data, inference, replay, evaluation snapshots, submission downloads, system diagnostics, policy, and correlation operations. Keep those checks in the backend even when the corresponding controls are hidden from guest users. The anonymous role must not gain access to private history tables; keep RLS enabled and verify ownership isolation with separate test users before production use.
 
-Supabase is not a substitute for durable job infrastructure. The current serverless runtime still has ephemeral local filesystem/SQLite behavior, and model/dataset artifacts are not provisioned by a standard Git deployment. Do not claim durable hosted replay history or production model-backed operation until those infrastructure paths are separately verified.
+Supabase is the durable store for hosted replay summaries and derived audit records, but it is not a substitute for durable job/artifact infrastructure. Vercel's filesystem remains ephemeral; official hidden replay input, trained model artifacts, and generated submission files are not provisioned by a standard Git deployment. Do not claim hosted official replay or full model-backed readiness until those artifact paths are separately provisioned and tested.
 
 ## Readiness checks
 
