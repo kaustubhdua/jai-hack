@@ -150,20 +150,31 @@ class AnomalyDetectionAgent:
         if len(scores) != len(truth) or not np.isfinite(scores).all():
             raise ValueError("Validation scores are missing or non-finite.")
 
+        # Evaluate every distinct threshold in O(n log n), not O(n^2).
+        # Sorting once and using prefix counts preserves the exact '< threshold'
+        # semantics and the original tie-break: recall, then lower FPR, then
+        # the larger threshold.
         candidates = np.unique(np.concatenate((scores, [np.nextafter(float(scores.max()), np.inf)])))
-        best = None
-        for candidate in candidates:
-            flagged = scores < float(candidate)
-            false_positive_rate = float((flagged & ~truth).sum() / benign_count)
-            recall = float((flagged & truth).sum() / attack_count)
-            if false_positive_rate <= max_benign_fpr:
-                rank = (recall, -false_positive_rate, float(candidate))
-                if best is None or rank > best[0]:
-                    best = (rank, float(candidate), false_positive_rate, recall)
-        if best is None:
+        order = np.argsort(scores, kind="mergesort")
+        sorted_scores = scores[order]
+        sorted_truth = truth[order]
+        prefix_attack = np.concatenate(([0], np.cumsum(sorted_truth, dtype=np.int64)))
+        prefix_benign = np.concatenate(([0], np.cumsum(~sorted_truth, dtype=np.int64)))
+        positions = np.searchsorted(sorted_scores, candidates, side="left")
+        false_positive_rates = prefix_benign[positions] / benign_count
+        attack_recalls = prefix_attack[positions] / attack_count
+        eligible = np.flatnonzero(false_positive_rates <= max_benign_fpr)
+        if eligible.size == 0:
             raise RuntimeError("No validation threshold satisfies the configured benign false-positive limit.")
-
-        _, self.threshold, fpr, recall = best
+        ranked = np.lexsort((
+            candidates[eligible],
+            -false_positive_rates[eligible],
+            attack_recalls[eligible],
+        ))
+        best_index = int(eligible[ranked[-1]])
+        self.threshold = float(candidates[best_index])
+        fpr = float(false_positive_rates[best_index])
+        recall = float(attack_recalls[best_index])
         self.metadata.update({
             "threshold_method": "validation-selected maximum attack recall subject to benign FPR constraint",
             "threshold_validation_rows": int(len(labels)),
