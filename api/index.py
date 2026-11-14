@@ -12,6 +12,7 @@ import tempfile
 import time
 import zipfile
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse
@@ -161,8 +162,8 @@ def get_history(request: Request, limit: int = 15):
     _require_authenticated_user(request)
     user_id, auth_error = _supabase_user_id(request)
     key = _supabase_public_key()
-    if user_id and key:
-        connection = http.client.HTTPSConnection("egwguyexqixmqytydesc.supabase.co", timeout=5)
+    if user_id and key and _supabase_project_host():
+        connection = http.client.HTTPSConnection(_supabase_project_host(), timeout=5)
         try:
             query = f"/rest/v1/replay_runs?select=run_id,dataset_name,total_records,blocked_records,allowed_records,policies_created,containment_rate,throughput_fps,status,created_at&order=created_at.desc&limit={max(1, min(limit, 50))}"
             connection.request("GET", query, headers={"apikey": key, "Authorization": request.headers.get("authorization", "")})
@@ -261,6 +262,29 @@ def _supabase_public_key() -> str | None:
     return (os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("VITE_SUPABASE_ANON_KEY") or "").strip() or None
 
 
+def _supabase_project_host() -> str | None:
+    """Resolve the configured Supabase HTTPS host; never pin the app to one project."""
+    raw_url = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL") or "").strip()
+    if not raw_url:
+        return None
+    try:
+        parsed = urlsplit(raw_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+        return parsed.hostname
+    except ValueError:
+        return None
+
+
 def _require_authenticated_user(request: Request) -> str | None:
     """Require a valid Supabase user for operational routes in configured deployments."""
     if not _supabase_public_key():
@@ -282,7 +306,10 @@ def _supabase_user_id(request: Request) -> tuple[str | None, str | None]:
     key = _supabase_public_key()
     if not key:
         return None, "supabase_public_key_not_configured"
-    connection = http.client.HTTPSConnection("egwguyexqixmqytydesc.supabase.co", timeout=5)
+    host = _supabase_project_host()
+    if not host:
+        return None, "supabase_url_not_configured"
+    connection = http.client.HTTPSConnection(host, timeout=5)
     try:
         connection.request("GET", "/auth/v1/user", headers={"apikey": key, "Authorization": token})
         response = connection.getresponse()
@@ -310,9 +337,12 @@ def _supabase_insert_rows(table: str, rows: list[dict[str, Any]], request: Reque
     if not user_id:
         return {"stored": False, "reason": auth_error or "not_authenticated"}
     key = _supabase_public_key()
+    host = _supabase_project_host()
+    if not key or not host:
+        return {"stored": False, "reason": "supabase_not_configured"}
     token = request.headers.get("authorization", "")
     safe_rows = [{**row, "user_id": user_id} for row in rows]
-    connection = http.client.HTTPSConnection("egwguyexqixmqytydesc.supabase.co", timeout=8)
+    connection = http.client.HTTPSConnection(host, timeout=8)
     try:
         connection.request(
             "POST", f"/rest/v1/{table}",
@@ -339,9 +369,10 @@ def _supabase_select_rows(table: str, query: str, request: Request) -> dict[str,
         return {"stored": False, "reason": "table_not_allowed", "rows": []}
     user_id, auth_error = _supabase_user_id(request)
     key = _supabase_public_key()
-    if not user_id or not key:
-        return {"stored": False, "reason": auth_error or "not_authenticated", "rows": []}
-    connection = http.client.HTTPSConnection("egwguyexqixmqytydesc.supabase.co", timeout=8)
+    host = _supabase_project_host()
+    if not user_id or not key or not host:
+        return {"stored": False, "reason": auth_error or "supabase_not_configured", "rows": []}
+    connection = http.client.HTTPSConnection(host, timeout=8)
     try:
         connection.request("GET", f"/rest/v1/{table}?{query}", headers={
             "apikey": key, "Authorization": request.headers.get("authorization", ""),
@@ -492,7 +523,7 @@ def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any],
 
 
 def _supabase_persistence_configured() -> bool:
-    return bool(_supabase_public_key())
+    return bool(_supabase_public_key() and _supabase_project_host())
 
 
 @app.post("/api/agents/anomaly/score")
