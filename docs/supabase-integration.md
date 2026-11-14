@@ -37,7 +37,7 @@ All following tables are in `cybersentinel`:
 - `replay_correlation_groups`: Agent 4 correlation groups, observed record membership and supporting evidence for each replay run.
 - `analysis_runs`: evaluation-run summary metadata.
 
-Raw network-flow rows and challenge datasets are never uploaded. The browser/authenticated role receives only SELECT and INSERT privileges; RLS limits both to the caller's own rows. No anonymous table privileges are granted.
+Raw network-flow rows and challenge datasets are never uploaded. The browser/authenticated role receives only SELECT and INSERT privileges; RLS limits both to the caller's own rows. No anonymous table privileges are granted. Table and sequence defaults in this schema were probed and do not grant API-role access. PostgreSQL's global default grants EXECUTE on newly created functions to PUBLIC; a schema-level default revoke cannot override that global grant. CyberSentinel currently creates no database functions, and the shared project's global function defaults are deliberately left unchanged to avoid affecting BharatSim or GenomeGuard. If a function is added to this schema, its migration must explicitly run `REVOKE EXECUTE ON FUNCTION schema.function_name(args) FROM PUBLIC, anon, authenticated, service_role` after creation and add a privilege regression test.
 
 ## Migration history
 
