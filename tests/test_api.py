@@ -107,13 +107,34 @@ def test_replay_simulate_endpoint(monkeypatch):
     assert len(data["replay_sample"]) == 2
 
 
-def test_benchmarks_endpoint():
+def test_benchmarks_endpoint_uses_canonical_generated_report(monkeypatch, tmp_path):
+    import json
+
+    report_path = tmp_path / "reports" / "generated" / "official_evaluation.json"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(json.dumps({"evaluation_only": True, "rows": 100}), encoding="utf-8")
+    monkeypatch.setattr(index, "BASE_DIR", tmp_path)
+
     response = TestClient(index.app).get("/api/benchmarks")
+
     assert response.status_code == 200
     data = response.json()
-    assert "source" in data
-    assert "verified_report" in data
-    assert isinstance(data["verified_report"], dict)
+    assert data["source"] == "reports/generated/official_evaluation.json"
+    assert data["verified_report"] == {"evaluation_only": True, "rows": 100}
+
+
+def test_benchmarks_endpoint_never_promotes_historical_archive(monkeypatch, tmp_path):
+    import json
+
+    historical_path = tmp_path / "release" / "day2-final" / "eval_benchmark_report.json"
+    historical_path.parent.mkdir(parents=True)
+    historical_path.write_text(json.dumps({"historical": True, "accuracy": 0.999}), encoding="utf-8")
+    monkeypatch.setattr(index, "BASE_DIR", tmp_path)
+
+    response = TestClient(index.app).get("/api/benchmarks")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "BENCHMARK_NOT_AVAILABLE"
 
 
 def test_submission_download_invalid_file():
