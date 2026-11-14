@@ -1,7 +1,6 @@
 # Deployment and Runtime Boundaries
 
 ## Supported execution mode
-
 CyberSentinel's authoritative workflow is local/offline replay. The FastAPI backend loads local model artifacts, reads the locally installed unlabelled hidden replay input, generates the three submission CSVs, and writes run history to local SQLite.
 
 Install and run the local stack from the repository root:
@@ -22,13 +21,13 @@ Vite proxies `/api` requests to `http://127.0.0.1:8000`. Install authorised inpu
 
 ## Vercel deployment
 
-The repository is connected to a Vercel project and the frontend/API bundle can build. A preview deployment for `feat/cybersentinel-release-hardening` reached Vercel `READY` on 2026-10-31. This confirms deployment packaging, not end-to-end model readiness or official replay acceptance.
+The repository is connected to a Vercel project and the frontend/API bundle can build. A preview deployment for `feat/cybersentinel-release-hardening` reached Vercel `READY` on 2026-10-31. The current production deployment is also reported as `READY`; this confirms deployment packaging, not end-to-end model readiness or official replay acceptance.
 
 Important limitations:
 
 - `data/processed/*` and `models/*` are intentionally ignored by Git. A standard Git-triggered Vercel deployment therefore does not contain the organiser evaluation dataset or fitted model artifacts.
 - Without both model files, `/api/health` reports `model_ready: false` and inference endpoints return `503 MODEL_NOT_READY`. The UI can load while the model-backed product workflow remains unavailable.
-- `POST /api/replay/run-official` is a synchronous request. `vercel.json` currently sets Python function `maxDuration` to 30 seconds. A full hidden replay may exceed that limit; run the official replay locally unless a separately tested background-job/artifact architecture is implemented.
+- `POST /api/replay/run-official` is a synchronous request. The current `vercel.json` config sets Python functions under `api/*.py` and `api/**/*.py` to `maxDuration: 300` seconds. This is a platform execution ceiling, not proof that a full hidden replay fits within it; run the official replay locally unless a separately tested background-job/artifact architecture is implemented.
 - The backend stores run history in local SQLite (`data/cybersentinel_history.db`). Serverless filesystem state is not a durable shared database across invocations or instances.
 - Preview deployments are protected by Vercel SSO in the current project configuration, so external browser QA requires an authorised session.
 
@@ -44,7 +43,7 @@ The React application supports a public guest path when Supabase Auth is configu
 
 Guest mode does not load /api/history or /api/overview, and it hides the Flow Inspector, replay, evidence-fusion, correlation, adaptive-defense, audit/history, and system-diagnostics screens. Authenticated analyst access remains available through Supabase Auth.
 
-This is a presentation/demo boundary, not a replacement for server authorization. Sensitive API routes must continue to enforce Supabase bearer-token authentication and user ownership independently of frontend navigation. Do not expose service-role credentials in Vite environment variables or browser bundles. The public demo must never be used to expose private replay rows, generated submissions, or administrative operations.
+This is a presentation/demo boundary, not a replacement for server authorization. Sensitive API routes must continue to enforce Supabase bearer-token authentication and user ownership independently of frontend navigation. The public demo must never be used to expose private replay rows, generated submissions, or administrative operations.
 
 ## Supabase authentication and data boundary
 
