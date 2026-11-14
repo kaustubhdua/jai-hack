@@ -150,7 +150,7 @@ def system_diagnostics(request: Request):
         },
         "submission_artifacts": files,
         "history_database": {"present": history_db.is_file(), "persistent": not SERVERLESS_RUNTIME, "mode": "ephemeral" if SERVERLESS_RUNTIME else "local_sqlite"},
-        "supabase": {"configured": _supabase_persistence_configured(), "auth": "required" if _supabase_persistence_configured() else "not_configured", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies", "replay_correlation_groups"]},
+        "supabase": {"configured": _supabase_persistence_configured(), "auth": "required" if _supabase_persistence_configured() else "not_configured", "schema": "cybersentinel", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies", "replay_correlation_groups"]},
         "source_identity": "literal observed source IP only; missing or invalid endpoint values remain unknown and never become synthetic identities",
         "firewall": {"mode": "simulated-only", "host_firewall_modified": False},
     }
@@ -166,14 +166,14 @@ def get_history(request: Request, limit: int = 15):
         connection = http.client.HTTPSConnection(_supabase_project_host(), timeout=5)
         try:
             query = f"/rest/v1/replay_runs?select=run_id,dataset_name,total_records,blocked_records,allowed_records,policies_created,containment_rate,throughput_fps,status,created_at&order=created_at.desc&limit={max(1, min(limit, 50))}"
-            connection.request("GET", query, headers={"apikey": key, "Authorization": request.headers.get("authorization", "")})
+            connection.request("GET", query, headers={"apikey": key, "Authorization": request.headers.get("authorization", ""), "Accept-Profile": "cybersentinel"})
             response = connection.getresponse()
             raw = response.read()
             if response.status != 200:
                 return {"runs": [], "evaluation_runs": [], "source": "supabase", "error": f"supabase_http_{response.status}"}
             runs = json.loads(raw.decode("utf-8"))
             eval_query = f"/rest/v1/analysis_runs?select=id,dataset_name,dataset_rows,processed_rows,status,model_version,accuracy,macro_f1,created_at&order=created_at.desc&limit={max(1, min(limit, 50))}"
-            connection.request("GET", eval_query, headers={"apikey": key, "Authorization": request.headers.get("authorization", "")})
+            connection.request("GET", eval_query, headers={"apikey": key, "Authorization": request.headers.get("authorization", ""), "Accept-Profile": "cybersentinel"})
             eval_response = connection.getresponse()
             eval_raw = eval_response.read()
             evaluation_runs = json.loads(eval_raw.decode("utf-8")) if eval_response.status == 200 else []
@@ -355,7 +355,7 @@ def _supabase_insert_rows(table: str, rows: list[dict[str, Any]], request: Reque
         connection.request(
             "POST", f"/rest/v1/{table}",
             body=json.dumps(safe_rows, separators=(",", ":")),
-            headers={"apikey": key, "Authorization": token, "Content-Type": "application/json", "Prefer": "return=minimal"},
+            headers={"apikey": key, "Authorization": token, "Content-Type": "application/json", "Content-Profile": "cybersentinel", "Prefer": "return=minimal"},
         )
         response = connection.getresponse()
         status = response.status
@@ -384,6 +384,7 @@ def _supabase_select_rows(table: str, query: str, request: Request) -> dict[str,
     try:
         connection.request("GET", f"/rest/v1/{table}?{query}", headers={
             "apikey": key, "Authorization": request.headers.get("authorization", ""),
+            "Accept-Profile": "cybersentinel",
         })
         response = connection.getresponse()
         raw = response.read()
