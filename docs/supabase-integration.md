@@ -34,8 +34,9 @@ The live Supabase project records the following versions. The corresponding vers
 - `20261031074806_tighten_analysis_run_snapshot_permissions.sql`
 - `20261031075817_index_agent2_user_id.sql`
 - `20261031080141_persist_replay_correlation_groups.sql`
+- `20261114194548_lock_down_public_default_privileges.sql`
 
-Earlier timestamp-named placeholder files are retained as no-ops so older checkouts do not replay already-applied schema changes.
+Earlier timestamp-named placeholder files are retained as no-ops so older checkouts do not replay already-applied schema changes. The latest migration also revokes automatic default table, sequence, and function privileges from API roles for future objects created by the migration role; new public objects must opt in through explicit grants and RLS.
 
 ## Smoke-test checklist
 
