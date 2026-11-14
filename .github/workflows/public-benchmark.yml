@@ -3,6 +3,12 @@ name: Public CIC-IDS2017 benchmark
 on:
   push:
     branches: [feat/open-source-benchmark-bootstrap]
+    paths:
+      - scripts/prepare_public_benchmark.py
+      - scripts/train_models.py
+      - scripts/evaluate_benchmark.py
+      - tests/test_public_benchmark.py
+      - .github/workflows/public-benchmark.yml
   workflow_dispatch:
     inputs:
       max_per_class:
@@ -41,7 +47,7 @@ jobs:
         run: |
           python scripts/prepare_public_benchmark.py \
             --output-dir data/raw/public-benchmark \
-            --max-per-class "${{ inputs.max_per_class }}" \
+            --max-per-class "${{ inputs.max_per_class || 50000 }}" \
             --seed 42
       - name: Train both learned agents
         run: |
@@ -50,7 +56,7 @@ jobs:
             --label-column label \
             --model-dir models \
             --report-dir reports/generated \
-            --n-estimators "${{ inputs.estimators }}"
+            --n-estimators "${{ inputs.estimators || 200 }}"
       - name: Evaluate on untouched public benchmark holdout
         run: |
           python scripts/evaluate_benchmark.py \
