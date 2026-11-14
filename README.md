@@ -222,7 +222,7 @@ The current threat model's own `numeric_features` routine independently drops id
 
 ### Local-only artifacts
 
-Organizer data, prepared Parquet files, fitted model artifacts under `models/*`, generated reports, replay outputs, and local databases are not normally committed. A repository checkout therefore does not, by itself, prove that runtime model inference or a full replay can execute. Install authorized inputs and train/load compatible model artifacts locally.
+Organizer data, prepared Parquet files, the current A1 model, generated reports, replay outputs, and local databases are not normally committed. A legacy A2 artifact remains tracked for compatibility and is covered by a load-and-score smoke test; its presence alone does not make the five-agent pipeline ready. A checkout still requires current, compatible A1/A2 artifacts and authorized data before full inference or official replay can run.
 
 ## ML evaluation framework
 
@@ -569,8 +569,8 @@ The public production console opens directly in a **read-only guest demo** for v
 
 Additional limitations documented in `docs/deployment.md`:
 
-- The Vercel Python function has a 30-second configured maximum duration; full replay may exceed it.
-- Run history uses local SQLite, not durable shared storage across serverless instances.
+- Vercel Python functions are configured for a 300-second maximum on the free Hobby plan. This is an execution ceiling, not proof that full replay fits; official hidden replay remains disabled in the hosted runtime until durable model/input/submission storage is provisioned.
+- Local/offline run history uses SQLite. Hosted batch replay summaries and derived audit records use Supabase Postgres with per-user RLS; official hidden replay files and submission artifacts remain local-only until durable artifact storage is provisioned.
 - A Vercel READY deployment indicates build/deployment state, not end-to-end model readiness, full replay success, or official organizer acceptance.
 - Preview deployments may still be protected by Vercel SSO; the production guest demo is intended for public viewing.
 
