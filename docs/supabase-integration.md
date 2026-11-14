@@ -35,7 +35,7 @@ The live Supabase project records the following versions. The corresponding vers
 - `20261031075817_index_agent2_user_id.sql`
 - `20261031080141_persist_replay_correlation_groups.sql`
 - `20261114194548_lock_down_public_default_privileges.sql`
-- `20261114194625_revoke_public_function_execute.sql`
+- `20261114194635_revoke_public_function_execute.sql`
 
 Earlier timestamp-named placeholder files are retained as no-ops so older checkouts do not replay already-applied schema changes. The latest migrations revoke automatic default table and sequence privileges from API roles, and revoke both per-schema and global default function execution. New public objects must opt in through explicit grants and RLS.
 
