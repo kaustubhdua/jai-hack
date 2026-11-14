@@ -106,7 +106,7 @@ def load_public_rows(data_dir: Path, max_per_class: int, seed: int, force_downlo
     excluded_labels: Counter[str] = Counter()
     raw_counts: Counter[str] = Counter()
     for filename in FILES:
-        path = data_dir / "downloads" / filename
+        path = data_dir / filename
         download_manifest.append(download_file(filename, path, force_download))
         frame = pd.read_parquet(path)
         label_col = _label_column(frame)
