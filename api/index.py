@@ -12,7 +12,7 @@ import tempfile
 import time
 import zipfile
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse
@@ -42,6 +42,22 @@ app = FastAPI(
     description="Offline 5-agent network-flow intrusion detection and adaptive defense replay system.",
 )
 app.include_router(evaluation_router)
+
+
+@app.middleware("http")
+async def restore_vercel_api_path(request: Request, call_next):
+    """Restore the original /api/* path after Vercel rewrites it to the /api function."""
+    raw_query = request.scope.get("query_string", b"").decode("latin-1")
+    query_items = parse_qsl(raw_query, keep_blank_values=True)
+    rewritten_path = next((value for key, value in query_items if key == "__vercel_path"), None)
+    if rewritten_path is not None:
+        suffix = rewritten_path.lstrip("/")
+        restored_path = "/api" + (f"/{suffix}" if suffix else "")
+        request.scope["path"] = restored_path
+        request.scope["raw_path"] = restored_path.encode("utf-8")
+        remaining = [(key, value) for key, value in query_items if key != "__vercel_path"]
+        request.scope["query_string"] = urlencode(remaining, doseq=True).encode("ascii")
+    return await call_next(request)
 
 THREAT_MODEL = BASE_DIR / "models" / "threat_detection" / "model.joblib"
 ANOMALY_MODEL = BASE_DIR / "models" / "anomaly_detection" / "model.joblib"

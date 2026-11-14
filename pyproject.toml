@@ -17,6 +17,7 @@ xgboost = ["xgboost>=2.0"]
 [project.scripts]
 cybersentinel = "cybersentinel.cli:main"
 
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
