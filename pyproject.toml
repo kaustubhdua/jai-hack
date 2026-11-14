@@ -17,8 +17,6 @@ xgboost = ["xgboost>=2.0"]
 [project.scripts]
 cybersentinel = "cybersentinel.cli:main"
 
-[tool.vercel.scripts]
-build = "npm ci && npm run build && mkdir -p public && cp -R dist/. public/"
 
 [tool.setuptools.packages.find]
 where = ["src"]
