@@ -78,7 +78,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add models/threat_detection/model.joblib models/anomaly_detection/model.joblib models/provenance/
+          git add -f models/threat_detection/model.joblib models/anomaly_detection/model.joblib models/provenance/
           if git diff --cached --quiet; then
             echo "Verified benchmark artifacts are already current."
           else
