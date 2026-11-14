@@ -74,3 +74,8 @@ python scripts/validate_submissions.py \
 ```
 
 The hidden replay is unlabelled. Do not calculate or claim hidden-set accuracy, macro-F1, false-block rate, attack recall, or containment from it. A local validator pass is not proof of organizer acceptance; retain the exact input hashes and only claim acceptance after an actual organizer response or receipt.
+
+
+### Agent 2 threshold calibration
+
+By default, Agent 2 uses its benign-training score distribution for the operating threshold. The optional `--calibrate-anomaly-threshold` flag selects the threshold using the separate labelled calibration holdout: the internal group-isolated holdout from the training partition when no external validation file is supplied, or the supplied `--validation` file otherwise. This is model selection, not final evaluation. Never use the held-out evaluation partition or hidden replay input for calibration or model selection. If `--calibration-fraction 0` is set, Agent 2 threshold calibration requires an external labelled validation file.
