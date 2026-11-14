@@ -588,3 +588,8 @@ Do not present the hosted deployment as a production-ready live SOC service unle
 
 
 Historical release and QA notes are indexed in [`release/README.md`](release/README.md). Their old pass statuses are historical snapshots, not current verification for this commit.
+
+
+## Open-source public benchmark
+
+When the private JAI organizer data pack is unavailable, CyberSentinel can be trained and evaluated against a pinned, public CIC-IDS2017 benchmark. This is an engineering validation path only; its metrics must never be presented as official JAI challenge scores. See [Open-source benchmark bootstrap](docs/open-source-benchmark.md) for the exact five-class mapping, dataset citation, provenance, commands, and manual GitHub Actions workflow.
