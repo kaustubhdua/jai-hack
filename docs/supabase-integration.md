@@ -6,8 +6,9 @@ CyberSentinel uses Supabase Auth and Postgres for user-scoped audit metadata. Ne
 
 Set these Vercel environment variables for Production, Preview and Development:
 
-- `VITE_SUPABASE_URL`: the Supabase project URL.
+- `VITE_SUPABASE_URL`: the Supabase project URL used by the browser client.
 - `VITE_SUPABASE_ANON_KEY`: the project's publishable key (the variable name is retained for compatibility; the value may use the `sb_publishable_` format).
+- `SUPABASE_URL` and `SUPABASE_ANON_KEY`: optional backend aliases. If omitted, the Python API falls back to the corresponding `VITE_*` variables. The backend derives its HTTPS host from the configured URL; it is not pinned to a particular project ref.
 
 The publishable key is public by design. RLS and the authenticated user's JWT enforce data ownership. Do not put a Supabase secret/service-role key in a `VITE_` or `NEXT_PUBLIC_` variable. The API forwards the user's bearer token to Supabase and resolves the user through Auth before writing.
 

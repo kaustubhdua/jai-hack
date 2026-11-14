@@ -42,6 +42,7 @@ class ReadyPipeline:
 
 def test_system_diagnostics_requires_auth_when_supabase_is_configured(monkeypatch):
     monkeypatch.setattr(index, "_supabase_public_key", lambda: "test-anon-key")
+    monkeypatch.setattr(index, "_supabase_project_host", lambda: "test-project.supabase.co")
     response = TestClient(index.app).get("/api/system/diagnostics")
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "AUTH_REQUIRED"
