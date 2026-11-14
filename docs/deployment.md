@@ -21,6 +21,8 @@ Vite proxies `/api` requests to `http://127.0.0.1:8000`. Install authorised inpu
 
 ## Vercel deployment
 
+The Vercel project must use the **FastAPI** framework preset, with `api/index.py` as the application entrypoint. This is important: the Vite preset treats each `api/*.py` file as a separate function and does not route all FastAPI decorators through the central application. The FastAPI preset mounts the full `api.index:app` router so every `/api/*` endpoint is served by the same application. The Vercel build command is version-controlled in `pyproject.toml` under `[tool.vercel.scripts]`; it installs the frontend dependencies, builds Vite, and copies `dist/` into `public/` for CDN serving. Keep the Vercel project install command on automatic detection so Python dependencies from `pyproject.toml` are installed. Do not override it with `npm ci` alone.
+
 The repository is connected to a Vercel project and the frontend/API bundle can build. A preview deployment for `feat/cybersentinel-release-hardening` reached Vercel `READY` on 2026-10-31. The current production deployment is also reported as `READY`; this confirms deployment packaging, not end-to-end model readiness or official replay acceptance.
 
 ### Current deployment handoff (2026-11-15)
@@ -38,7 +40,7 @@ Important limitations:
 - `POST /api/replay/run-official` remains disabled in the serverless runtime until verified model/input artifacts and durable submission-file storage are provisioned. Run the official challenge workflow with the documented offline runner; hosted audit history is still persisted to Supabase.
 - `POST /api/replay/run-official` is a synchronous request. The current `vercel.json` config sets Python functions under `api/*.py` and `api/**/*.py` to `maxDuration: 300` seconds. This is a platform execution ceiling, not proof that a full hidden replay fits within it; run the official replay locally unless a separately tested background-job/artifact architecture is implemented.
 - Local/offline runs also maintain a local SQLite convenience history (`data/cybersentinel_history.db`). On Vercel, `/api/replay/simulate` does not write SQLite: it stores run summaries, decisions, policies, and correlation groups in Supabase Postgres using the caller's JWT and RLS. Raw flow records and model artifacts are not stored in Postgres.
-- Preview deployments are protected by Vercel SSO in the current project configuration, so external browser QA requires an authorised session.
+- Preview deployments should remain protected by Vercel SSO; use an authorised session for browser QA. Production custom domains are public.
 
 Do not describe the Vercel deployment as a verified production SOC service until model/data provisioning, durable run storage, full replay execution, API routes, and browser workflows have been tested end-to-end in that environment.
 
