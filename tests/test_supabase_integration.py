@@ -63,6 +63,7 @@ def test_supabase_insert_uses_verified_user_and_user_jwt(monkeypatch):
     assert calls[0]["path"] == "/rest/v1/flow_analysis_events"
     assert calls[0]["headers"]["apikey"] == "sb_publishable_test"
     assert calls[0]["headers"]["Authorization"] == "Bearer signed-user-jwt"
+    assert calls[0]["headers"]["Content-Profile"] == "cybersentinel"
     assert json.loads(calls[0]["body"])[0]["user_id"] == "00000000-0000-4000-8000-000000000001"
 
 
@@ -162,6 +163,7 @@ def test_supabase_select_rows_uses_user_jwt_and_allowlisted_table(monkeypatch):
     assert calls[0]["method"] == "GET"
     assert calls[0]["path"] == "/rest/v1/replay_correlation_groups?select=group_id&limit=5"
     assert calls[0]["headers"]["Authorization"] == "Bearer signed-user-jwt"
+    assert calls[0]["headers"]["Accept-Profile"] == "cybersentinel"
 
 
 
@@ -204,3 +206,52 @@ def test_missing_supabase_url_keeps_local_runtime_unauthenticated(monkeypatch):
     })
 
     assert index._require_authenticated_user(request) is None
+
+
+
+def test_history_reads_use_cybersentinel_schema_profile(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status = 200
+
+        def read(self):
+            return b"[]"
+
+    class FakeConnection:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def request(self, method, path, body=None, headers=None):
+            calls.append({"method": method, "path": path, "headers": headers})
+
+        def getresponse(self):
+            return FakeResponse()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(index, "_supabase_public_key", lambda: "sb_publishable_test")
+    monkeypatch.setattr(index, "_supabase_project_host", lambda: "common1.supabase.co")
+    monkeypatch.setattr(index, "_supabase_user_id", lambda request: ("00000000-0000-4000-8000-000000000001", None))
+    monkeypatch.setattr(index, "_require_authenticated_user", lambda request: "00000000-0000-4000-8000-000000000001")
+    monkeypatch.setattr(index.http.client, "HTTPSConnection", FakeConnection)
+    request = Request({
+        "type": "http",
+        "headers": [(b"authorization", b"Bearer signed-user-jwt")],
+        "method": "GET",
+        "path": "/api/history",
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("testclient", 123),
+        "scheme": "http",
+        "http_version": "1.1",
+    })
+
+    response = index.get_history(request, limit=10)
+
+    assert response["source"] == "supabase"
+    assert len(calls) == 2
+    assert all(call["headers"]["Accept-Profile"] == "cybersentinel" for call in calls)
+    assert calls[0]["path"].startswith("/rest/v1/replay_runs?")
+    assert calls[1]["path"].startswith("/rest/v1/analysis_runs?")
