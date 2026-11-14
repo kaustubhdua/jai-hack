@@ -89,3 +89,7 @@ UNSW-NB15 is a second, independent public dataset maintained by UNSW Canberra: h
 - It does not prove official submission acceptance.
 
 Official release readiness still requires the organizer's actual packs, local hidden replay, validated three-file submission bundle, live deployment checks, and authenticated browser acceptance.
+
+## Agent 2 threshold calibration
+
+The public benchmark workflow invokes `--calibrate-anomaly-threshold --max-benign-fpr 0.02`. This selects Agent 2's threshold on the separate 15% group-isolated holdout drawn only from the training partition, targeting at most 2% benign false positives. The untouched evaluation partition is used only for final scoring. The manifest records this threshold-selection provenance. This is training-side model selection, not official JAI challenge evaluation.
