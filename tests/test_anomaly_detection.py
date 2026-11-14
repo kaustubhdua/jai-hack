@@ -157,3 +157,29 @@ def test_load_legacy_v1_artifact_without_top_level_version_or_score_scale(tmp_pa
     assert result.status == "success"
     assert result.anomaly_score is not None
     assert restored.metadata["legacy_score_scale_fallback"] is True
+
+
+
+def test_committed_agent2_model_artifact_loads_and_scores():
+    from pathlib import Path
+
+    artifact = Path(__file__).resolve().parents[1] / "models" / "anomaly_detection" / "model.joblib"
+    assert artifact.is_file(), "the committed Agent 2 artifact must be present in the deployable repository"
+
+    agent = AnomalyDetectionAgent.load(artifact)
+    assert agent.estimator is not None
+    assert agent.imputer is not None
+    assert agent.threshold is not None
+    assert agent.score_scale is not None and agent.score_scale > 0
+    assert agent.feature_columns
+    assert len(agent.feature_columns) == len(set(agent.feature_columns))
+
+    flow = {
+        column: float(agent.profiles.get(column, {}).get("median", 0.0))
+        for column in agent.feature_columns
+    }
+    result = agent.score(flow)
+    assert result.status == "success"
+    assert result.anomaly_score is not None
+    assert 0.0 <= result.anomaly_score <= 1.0
+    assert isinstance(result.is_anomaly, bool)
