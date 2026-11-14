@@ -183,3 +183,55 @@ def test_committed_agent2_model_artifact_loads_and_scores():
     assert result.anomaly_score is not None
     assert 0.0 <= result.anomaly_score <= 1.0
     assert isinstance(result.is_anomaly, bool)
+
+
+def test_threshold_calibration_matches_brute_force_reference():
+    from cybersentinel.agents.anomaly_detection import _numeric_frame
+
+    agent = AnomalyDetectionAgent().fit(benign_sample(rows=300))
+    validation_benign = benign_sample(rows=80)
+    validation_attack = pd.DataFrame({
+        "Destination Port": np.full(40, 65500.0),
+        "Flow Duration": np.full(40, 9_000_000.0),
+        "Total Fwd Packets": np.full(40, 50000.0),
+        "Flow Packets/s": np.full(40, 900000.0),
+        "Flow Bytes/s": np.full(40, 90000000.0),
+    })
+    validation = pd.concat([validation_benign, validation_attack], ignore_index=True)
+    truth = np.array([False] * len(validation_benign) + [True] * len(validation_attack))
+    raw = _numeric_frame(validation).reindex(columns=agent.feature_columns)
+    scores = np.asarray(agent.estimator.decision_function(agent.imputer.transform(raw)), dtype=float)
+    candidates = np.unique(np.concatenate((scores, [np.nextafter(float(scores.max()), np.inf)])))
+    expected = max(
+        (
+            (
+                float(((scores < candidate) & truth).sum() / truth.sum()),
+                -float(((scores < candidate) & ~truth).sum() / (~truth).sum()),
+                float(candidate),
+            ),
+            float(candidate),
+        )
+        for candidate in candidates
+        if float(((scores < candidate) & ~truth).sum() / (~truth).sum()) <= 0.05
+    )[1]
+
+    agent.calibrate_threshold(validation, ["BENIGN"] * len(validation_benign) + ["DOS"] * len(validation_attack), max_benign_fpr=0.05)
+    assert agent.threshold == expected
+
+
+def test_threshold_calibration_handles_large_validation_partition():
+    agent = AnomalyDetectionAgent().fit(benign_sample(rows=500))
+    benign = benign_sample(rows=10000)
+    attacks = pd.DataFrame({
+        "Destination Port": np.full(10000, 65500.0),
+        "Flow Duration": np.full(10000, 9_000_000.0),
+        "Total Fwd Packets": np.full(10000, 50000.0),
+        "Flow Packets/s": np.full(10000, 900000.0),
+        "Flow Bytes/s": np.full(10000, 90000000.0),
+    })
+    validation = pd.concat([benign, attacks], ignore_index=True)
+    labels = ["BENIGN"] * len(benign) + ["DOS"] * len(attacks)
+    metrics = agent.calibrate_threshold(validation, labels, max_benign_fpr=0.02)
+    assert metrics["validation_rows"] == 20000
+    assert metrics["benign_false_positive_rate"] <= 0.02
+    assert 0.0 <= metrics["attack_recall"] <= 1.0
