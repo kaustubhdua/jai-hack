@@ -39,6 +39,7 @@ def test_supabase_insert_uses_verified_user_and_user_jwt(monkeypatch):
             pass
 
     monkeypatch.setattr(index, "_supabase_public_key", lambda: "sb_publishable_test")
+    monkeypatch.setattr(index, "_supabase_project_host", lambda: "test-project.supabase.co")
     monkeypatch.setattr(index, "_supabase_user_id", lambda request: ("00000000-0000-4000-8000-000000000001", None))
     monkeypatch.setattr(index.http.client, "HTTPSConnection", FakeConnection)
     request = Request({
@@ -136,6 +137,7 @@ def test_supabase_select_rows_uses_user_jwt_and_allowlisted_table(monkeypatch):
             pass
 
     monkeypatch.setattr(index, "_supabase_public_key", lambda: "sb_publishable_test")
+    monkeypatch.setattr(index, "_supabase_project_host", lambda: "test-project.supabase.co")
     monkeypatch.setattr(index, "_supabase_user_id", lambda request: ("00000000-0000-4000-8000-000000000001", None))
     monkeypatch.setattr(index.http.client, "HTTPSConnection", FakeConnection)
     request = Request({
@@ -159,3 +161,25 @@ def test_supabase_select_rows_uses_user_jwt_and_allowlisted_table(monkeypatch):
     assert calls[0]["method"] == "GET"
     assert calls[0]["path"] == "/rest/v1/replay_correlation_groups?select=group_id&limit=5"
     assert calls[0]["headers"]["Authorization"] == "Bearer signed-user-jwt"
+
+
+
+def test_supabase_project_host_uses_environment_and_rejects_insecure_urls(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.setenv("VITE_SUPABASE_URL", "https://new-project.supabase.co")
+    assert index._supabase_project_host() == "new-project.supabase.co"
+
+    monkeypatch.setenv("SUPABASE_URL", "http://new-project.supabase.co")
+    assert index._supabase_project_host() is None
+
+    monkeypatch.setenv("SUPABASE_URL", "https://user:pass@new-project.supabase.co")
+    assert index._supabase_project_host() is None
+
+
+def test_supabase_persistence_requires_both_url_and_public_key(monkeypatch):
+    monkeypatch.setenv("VITE_SUPABASE_URL", "https://new-project.supabase.co")
+    monkeypatch.setenv("VITE_SUPABASE_ANON_KEY", "sb_publishable_test")
+    assert index._supabase_persistence_configured() is True
+
+    monkeypatch.delenv("VITE_SUPABASE_URL")
+    assert index._supabase_persistence_configured() is False
