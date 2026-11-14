@@ -11,7 +11,6 @@ import argparse
 import hashlib
 import json
 import random
-import shutil
 import urllib.request
 from collections import Counter
 from pathlib import Path
