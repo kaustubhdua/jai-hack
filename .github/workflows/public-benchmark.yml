@@ -2,7 +2,7 @@ name: Public CIC-IDS2017 benchmark
 
 on:
   push:
-    branches: [feat/open-source-benchmark-bootstrap]
+    branches: [main, feat/open-source-benchmark-bootstrap, fix/public-benchmark-cli-import]
     paths:
       - scripts/prepare_public_benchmark.py
       - scripts/train_models.py
