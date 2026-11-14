@@ -31,12 +31,17 @@ def evaluate(eval_path: str, threat_path: str, anomaly_path: str, output: str, f
     frame = load_frame(eval_path)
     if "label" not in frame.columns:
         raise ValueError("Evaluation file must contain the canonical label column.")
-    truth = frame["label"].astype(str).str.strip()
+    if frame.empty:
+        raise ValueError("Evaluation file contains no rows.")
+    raw_truth = frame["label"]
+    if raw_truth.isna().any():
+        raise ValueError("Evaluation labels contain missing values.")
+    truth = raw_truth.astype(str).str.strip()
+    if (truth == "").any():
+        raise ValueError("Evaluation labels contain empty values.")
     unknown = sorted(set(truth.unique()) - set(CLASSES))
     if unknown:
         raise ValueError(f"Evaluation labels are not canonical benchmark classes: {unknown}")
-    if truth.isna().any():
-        raise ValueError("Evaluation labels contain missing values.")
     features = frame.drop(columns=["label"], errors="ignore")
 
     threat = ThreatDetectionAgent.load(threat_path)
@@ -68,7 +73,9 @@ def evaluate(eval_path: str, threat_path: str, anomaly_path: str, output: str, f
     rng = np.random.default_rng(42)
     indices = rng.choice(len(frame), size=min(max(0, fusion_sample), len(frame)), replace=False)
     actions = {"ALLOW": 0, "BLOCK": 0, "REVIEW": 0}
-    evidence_status = {"AGREE": 0, "DISAGREE": 0, "INCOMPLETE": 0}
+    # Keep this mapping aligned with EvidenceFusionAgent's contract:
+    # AGREE, CONFLICT, and UNCERTAIN.
+    evidence_status = {"AGREE": 0, "CONFLICT": 0, "UNCERTAIN": 0}
     for idx in indices:
         result = fusion.fuse(predictions[int(idx)], anomaly_results[int(idx)])
         actions[result.action] += 1
