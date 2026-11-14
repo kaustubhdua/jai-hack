@@ -107,13 +107,34 @@ def test_replay_simulate_endpoint(monkeypatch):
     assert len(data["replay_sample"]) == 2
 
 
-def test_benchmarks_endpoint():
+def test_benchmarks_endpoint_uses_canonical_generated_report(monkeypatch, tmp_path):
+    import json
+
+    report_path = tmp_path / "reports" / "generated" / "official_evaluation.json"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(json.dumps({"evaluation_only": True, "rows": 100}), encoding="utf-8")
+    monkeypatch.setattr(index, "BASE_DIR", tmp_path)
+
     response = TestClient(index.app).get("/api/benchmarks")
+
     assert response.status_code == 200
     data = response.json()
-    assert "source" in data
-    assert "verified_report" in data
-    assert isinstance(data["verified_report"], dict)
+    assert data["source"] == "reports/generated/official_evaluation.json"
+    assert data["verified_report"] == {"evaluation_only": True, "rows": 100}
+
+
+def test_benchmarks_endpoint_never_promotes_historical_archive(monkeypatch, tmp_path):
+    import json
+
+    historical_path = tmp_path / "release" / "day2-final" / "eval_benchmark_report.json"
+    historical_path.parent.mkdir(parents=True)
+    historical_path.write_text(json.dumps({"historical": True, "accuracy": 0.999}), encoding="utf-8")
+    monkeypatch.setattr(index, "BASE_DIR", tmp_path)
+
+    response = TestClient(index.app).get("/api/benchmarks")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "BENCHMARK_NOT_AVAILABLE"
 
 
 def test_submission_download_invalid_file():
@@ -231,3 +252,62 @@ def test_dedicated_batch_function_passes_request_context(monkeypatch):
     response = TestClient(dedicated_app).post("/", json={"flows": [{"Flow Duration": 100}]})
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "MODEL_NOT_READY"
+
+
+
+def test_serverless_replay_uses_supabase_without_ephemeral_sqlite(monkeypatch):
+    monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
+    monkeypatch.setattr(index, "_pipeline", ReadyPipeline())
+    monkeypatch.setattr(index, "_supabase_persistence_configured", lambda: True)
+    monkeypatch.setattr(
+        index, "_supabase_user_id",
+        lambda request: ("00000000-0000-4000-8000-000000000001", None),
+    )
+    monkeypatch.setattr(
+        index, "_persist_replay_run",
+        lambda *args, **kwargs: {"stored": True, "backend": "supabase"},
+    )
+    monkeypatch.setattr(
+        index, "_persist_replay_artifacts",
+        lambda *args, **kwargs: {"stored": True, "decisions_saved": 2},
+    )
+
+    def reject_local_sqlite_write(**kwargs):
+        raise AssertionError("Vercel must not write replay history to ephemeral SQLite")
+
+    monkeypatch.setattr(index, "record_run", reject_local_sqlite_write)
+    flows = [
+        {
+            "record_id": "flow-001", "seq": 1, "day": "2017-07-04",
+            "time_offset": "00:00.0", "source_ip": "10.0.0.1",
+            "destination_ip": "10.0.0.2", "source_port": 50000,
+            "destination_port": 443, "protocol": 6,
+            "Destination Port": 443, "Flow Duration": 1000,
+        },
+        {
+            "record_id": "flow-002", "seq": 2, "day": "2017-07-04",
+            "time_offset": "00:01.0", "source_ip": "10.0.0.1",
+            "destination_ip": "10.0.0.2", "source_port": 50001,
+            "destination_port": 443, "protocol": 6,
+            "Destination Port": 443, "Flow Duration": 1200,
+        },
+    ]
+
+    response = TestClient(index.app).post(
+        "/api/replay/simulate", json={"flows": flows, "dataset_name": "hosted-smoke"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["supabase_persistence"]["stored"] is True
+    assert payload["supabase_persistence"]["artifacts"]["stored"] is True
+
+
+def test_hosted_private_routes_fail_closed_without_supabase(monkeypatch):
+    monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
+    monkeypatch.setattr(index, "_supabase_persistence_configured", lambda: False)
+
+    response = TestClient(index.app).get("/api/history")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "SUPABASE_NOT_CONFIGURED"
