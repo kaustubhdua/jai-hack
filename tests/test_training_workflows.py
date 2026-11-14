@@ -111,3 +111,37 @@ def test_combined_training_workflow_rejects_training_file_as_external_validation
             report_dir=tmp_path / "reports",
             n_estimators=10,
         )
+
+
+def test_combined_training_can_calibrate_agent2_on_internal_training_holdout(tmp_path):
+    training_path = tmp_path / "training.csv"
+    small_frame(rows_per_class=30).to_csv(training_path, index=False)
+    manifest = train_models(
+        training_path=training_path,
+        validation_path=None,
+        model_dir=tmp_path / "models",
+        report_dir=tmp_path / "reports",
+        calibration_fraction=0.2,
+        n_estimators=10,
+        calibrate_anomaly_threshold=True,
+    )
+    assert manifest["validation_source"] == "internal_stratified_holdout_from_training_partition"
+    assert manifest["a2"]["threshold_calibrated"] is True
+    assert manifest["a2"]["threshold_selection_source"] == "internal_training_holdout"
+    assert manifest["evaluation_data_used_for_training_or_calibration"] is False
+    assert manifest["hidden_data_used_for_training_or_calibration"] is False
+
+
+def test_agent2_internal_threshold_calibration_requires_a_holdout(tmp_path):
+    training_path = tmp_path / "training.csv"
+    small_frame(rows_per_class=20).to_csv(training_path, index=False)
+    with pytest.raises(ValueError, match="labelled holdout"):
+        train_models(
+            training_path=training_path,
+            validation_path=None,
+            model_dir=tmp_path / "models",
+            report_dir=tmp_path / "reports",
+            calibration_fraction=0,
+            n_estimators=10,
+            calibrate_anomaly_threshold=True,
+        )
