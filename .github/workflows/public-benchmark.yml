@@ -2,7 +2,7 @@ name: Public CIC-IDS2017 benchmark
 
 on:
   push:
-    branches: [main, feat/open-source-benchmark-bootstrap, fix/public-benchmark-cli-import]
+    branches: [main, feat/open-source-benchmark-bootstrap, fix/public-benchmark-cli-import, fix/agent2-training-holdout-calibration]
     paths:
       - scripts/prepare_public_benchmark.py
       - scripts/train_models.py
@@ -56,7 +56,7 @@ jobs:
             --label-column label \
             --model-dir models \
             --report-dir reports/generated \
-            --n-estimators "${{ inputs.estimators || 200 }}"
+            --n-estimators "${{ inputs.estimators || 200 }}" \\\n            --calibrate-anomaly-threshold \\\n            --max-benign-fpr 0.02
       - name: Evaluate on untouched public benchmark holdout
         run: |
           python scripts/evaluate_benchmark.py \
