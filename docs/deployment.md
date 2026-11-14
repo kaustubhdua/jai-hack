@@ -23,6 +23,14 @@ Vite proxies `/api` requests to `http://127.0.0.1:8000`. Install authorised inpu
 
 The repository is connected to a Vercel project and the frontend/API bundle can build. A preview deployment for `feat/cybersentinel-release-hardening` reached Vercel `READY` on 2026-10-31. The current production deployment is also reported as `READY`; this confirms deployment packaging, not end-to-end model readiness or official replay acceptance.
 
+### Current deployment handoff (2026-11-15)
+
+The latest `main` source includes the isolated `common 1` Supabase schema integration. GitHub's Python tests, static-security checks, and frontend build pass on the latest main commit. Vercel's project environment variables now point to `common 1`, but Vercel applies environment changes to a deployment only when that deployment is built.
+
+The production alias still points to the older deployment built from commit `d3b061d`, before the common-schema integration. The old dedicated `jai-hack` Supabase project is now paused, so the old production deployment must be treated as **temporarily unavailable for authenticated backend operations** until a new production build is ready and the aliases are moved. Do not describe the current production alias as running the latest code.
+
+Vercel rejected new deployment creation with `402 payment_required` / `api-deployments-free-per-day` and a 24-hour retry window. Do not repeatedly retry or upgrade the plan just to bypass the limit. After the quota window resets, deploy the latest `main` commit, wait for `READY`, then verify `/api/health`, `/api/models/status`, Supabase sign-up/sign-in, one authenticated replay write/read, and two-user RLS isolation before treating production as restored. Older preview deployments from intermediate commits are not suitable substitutes for the latest main build.
+
 Important limitations:
 
 - `data/processed/*` and `models/*` are intentionally ignored by Git. A standard Git-triggered Vercel deployment therefore does not contain the organiser evaluation dataset or fitted model artifacts.
