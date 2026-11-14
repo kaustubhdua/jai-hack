@@ -75,7 +75,7 @@ def download_file(filename: str, destination: Path, force: bool = False) -> dict
     digest = hashlib.sha256()
     size = 0
     try:
-        with urllib.request.urlopen(request, timeout=90) as response, temporary.open("wb") as output:
+        with urllib.request.urlopen(request, timeout=90) as response, temporary.open("wb") as output:  # nosec B310: fixed HTTPS host, pinned dataset revision
             while True:
                 chunk = response.read(1024 * 1024)
                 if not chunk:
