@@ -167,5 +167,6 @@ Use synthetic fixtures for automated tests. Keep downloaded public datasets outs
 ## Documentation
 
 - [Open-data workflow](docs/OPEN_DATA_WORKFLOW.md)
+- [CIC-IDS2017 benchmark results and validation limits](docs/CIC_IDS2017_BENCHMARK.md)
 - [Synthetic judge demo](docs/synthetic-judge-demo.md)
 - [Source code](https://github.com/kaustubhdua/jai-hack)
