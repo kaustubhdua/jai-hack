@@ -298,7 +298,7 @@ def _database_user_id(request: Request) -> tuple[str | None, str | None]:
 
 
 def _require_authenticated_user(request: Request) -> str | None:
-    if not database_configured():
+    if not _database_persistence_configured():
         if SERVERLESS_RUNTIME:
             raise HTTPException(status_code=503, detail={"code": "DATABASE_NOT_CONFIGURED", "message": "Neon Postgres and AUTH_SECRET must be configured."})
         return None
