@@ -20,6 +20,12 @@ export default function UniversalWorkspace() {
   const [experiment, setExperiment] = useState("");
   const [label, setLabel] = useState("label");
   const [datasetType, setDatasetType] = useState("auto");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [licence, setLicence] = useState("");
+  const [retrievalDate, setRetrievalDate] = useState("");
+  const [citation, setCitation] = useState("");
+  const [nEstimators, setNEstimators] = useState(300);
+  const [randomState, setRandomState] = useState(42);
   const [features, setFeatures] = useState("");
   const [dropColumns, setDropColumns] = useState("");
   const [model, setModel] = useState("random_forest");
@@ -48,7 +54,11 @@ export default function UniversalWorkspace() {
     setBusy(true); setError(""); setResult(null);
     try {
       const body = new FormData(); body.append("file", file);
-      const data = await payload(await apiFetch(`/api/workspace/datasets?dataset_type=${datasetType}`, { method: "POST", body }));
+      const query = new URLSearchParams({
+        dataset_type: datasetType, source_url: sourceUrl, licence,
+        retrieval_date: retrievalDate, citation,
+      });
+      const data = await payload(await apiFetch(`/api/workspace/datasets?${query.toString()}`, { method: "POST", body }));
       await refresh();
       setSelected(data.dataset_id); setTarget(data.dataset_id); setProfile(data);
     } catch (err) { setError(err instanceof Error ? err.message : "Upload failed."); }
@@ -75,6 +85,7 @@ export default function UniversalWorkspace() {
           dataset_id: selected, label_column: label, model, label_mapping,
           feature_columns: features.trim() ? features.split(",").map(x => x.trim()).filter(Boolean) : null,
           drop_columns: dropColumns.trim() ? dropColumns.split(",").map(x => x.trim()).filter(Boolean) : null,
+          n_estimators: nEstimators, random_state: randomState,
         }),
       }));
       setResult(data); setExperiment(String(data.experiment_id)); await refresh();
@@ -136,6 +147,10 @@ export default function UniversalWorkspace() {
           <option value="bot-iot">Bot-IoT</option><option value="cse-cic-ids2018">CSE-CIC-IDS2018</option>
           <option value="ciciot2023">CICIoT2023</option><option value="generic">Generic</option>
         </select>
+        <label className="uw-label">Source URL (optional)</label><input value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="https://dataset-provider.example/source"/>
+        <label className="uw-label">Dataset licence (optional)</label><input value={licence} onChange={e => setLicence(e.target.value)} placeholder="CC BY 4.0 / provider terms"/>
+        <label className="uw-label">Retrieval date (optional)</label><input value={retrievalDate} onChange={e => setRetrievalDate(e.target.value)} placeholder="YYYY-MM-DD"/>
+        <label className="uw-label">Citation (optional)</label><input value={citation} onChange={e => setCitation(e.target.value)} placeholder="Dataset paper or DOI"/>
         <label className="uw-label">Training dataset</label>
         <select value={selected} onChange={e => setSelected(e.target.value)}><option value="">Select dataset</option>{datasets.map(d=><option key={d.dataset_id} value={d.dataset_id}>{d.original_filename}</option>)}</select>
         <button className="secondary-btn" disabled={!selected || busy} onClick={() => void inspect()}>Inspect selected dataset</button>
@@ -155,6 +170,8 @@ export default function UniversalWorkspace() {
           <option value="isolation_forest">Isolation Forest · unsupervised</option><option value="pytorch_mlp">PyTorch MLP · optional</option>
         </select>
         <label className="uw-label">Label column</label><input value={label} onChange={e => setLabel(e.target.value)} placeholder="label"/>
+        <label className="uw-label">Number of estimators</label><input type="number" min={10} max={2000} value={nEstimators} onChange={e => setNEstimators(Number(e.target.value))}/>
+        <label className="uw-label">Random seed</label><input type="number" value={randomState} onChange={e => setRandomState(Number(e.target.value))}/>
         <label className="uw-label">Feature allow-list (comma-separated, optional)</label>
         <input value={features} onChange={e => setFeatures(e.target.value)} placeholder="Flow Duration, Protocol, Destination Port"/>
         <label className="uw-label">Drop columns (comma-separated, optional)</label>
