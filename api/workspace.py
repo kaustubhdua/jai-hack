@@ -271,13 +271,25 @@ def detect(experiment_id: int, dataset_id: str):
         raise HTTPException(status_code=422, detail={"message": "Dataset is missing model features.", "missing_features": missing})
     X = frame[features].apply(pd.to_numeric, errors="coerce").replace([float("inf"), float("-inf")], float("nan"))
     estimator = bundle["estimator"]
+    # Preserve useful source context in every prediction/alert export. Without
+    # this, an analyst could see an alert count but not identify the event row.
+    context_columns = [
+        "id", "flow_id", "record_id", "timestamp", "stime",
+        "source_ip", "destination_ip", "source_port", "destination_port",
+        "protocol", "event_type", "signature", "signature_id", "severity",
+        "rule_id", "rule_level", "agent_id", "agent_name",
+    ]
+    context_columns = [column for column in context_columns if column in frame.columns]
+    result = frame[context_columns].copy()
+    result.insert(0, "row_index", range(len(frame)))
     if bundle["config"]["model"] == "isolation_forest":
         raw = estimator.predict(X)
         score = -estimator.decision_function(X)
-        result = pd.DataFrame({"prediction": ["ANOMALY" if value == -1 else "NORMAL" for value in raw], "anomaly_score": score})
+        result["prediction"] = ["ANOMALY" if value == -1 else "NORMAL" for value in raw]
+        result["anomaly_score"] = score
     else:
         predictions = estimator.predict(X)
-        result = pd.DataFrame({"prediction": predictions.astype(str)})
+        result["prediction"] = predictions.astype(str)
         if hasattr(estimator, "predict_proba"):
             probabilities = estimator.predict_proba(X)
             result["confidence"] = probabilities.max(axis=1)
