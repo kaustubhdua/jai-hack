@@ -36,7 +36,7 @@ ALLOWED_SUFFIXES = {".csv", ".parquet", ".pq", ".feather", ".arrow"}
 def _dataset_path(dataset_id: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{32}", dataset_id):
         raise HTTPException(status_code=400, detail="Invalid dataset identifier.")
-    matches = list(UPLOADS.glob(dataset_id + ".*"))
+    matches = [UPLOADS / f"{dataset_id}{suffix}" for suffix in ALLOWED_SUFFIXES if (UPLOADS / f"{dataset_id}{suffix}").is_file()]
     if len(matches) != 1 or not matches[0].is_file():
         raise HTTPException(status_code=404, detail="Dataset not found in this local workspace.")
     return matches[0]
