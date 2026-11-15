@@ -27,3 +27,6 @@ outputs/
 node_modules/
 data/*.db
 data/*.sqlite
+
+# Personal analyst workspace: uploaded datasets, trained models and local history
+data/workspace/
