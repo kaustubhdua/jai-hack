@@ -213,14 +213,26 @@ def evaluate_classifier_vs_fusion(
         y_true = [row[label_column] for row in df]
         flows = list(df)
 
-    a1_results = []
-    a3_results = []
-    for flow in flows:
-        a1_res = threat_agent.predict(flow)
-        a2_res = anomaly_agent.score(flow)
-        a3_res = fusion_agent.fuse(a1_res, a2_res)
-        a1_results.append(a1_res)
-        a3_results.append(a3_res)
+    # Prefer the agents' vectorized frame APIs when available. Repeated
+    # one-row pandas/model calls are dramatically slower and can make a
+    # full benchmark impractical on modest local hardware.
+    if isinstance(df, pd.DataFrame) and hasattr(threat_agent, "predict_frame"):
+        a1_results = list(threat_agent.predict_frame(df))
+    else:
+        a1_results = [threat_agent.predict(flow) for flow in flows]
+
+    if isinstance(df, pd.DataFrame) and hasattr(anomaly_agent, "score_frame"):
+        a2_results = list(anomaly_agent.score_frame(df))
+    else:
+        a2_results = [anomaly_agent.score(flow) for flow in flows]
+
+    if len(a1_results) != len(y_true) or len(a2_results) != len(y_true):
+        raise ValueError("Agent batch results must align one-to-one with evaluation rows.")
+
+    a3_results = [
+        fusion_agent.fuse(a1_res, a2_res)
+        for a1_res, a2_res in zip(a1_results, a2_results)
+    ]
 
     res = evaluate_fusion_comparison(
         y_true=y_true,
