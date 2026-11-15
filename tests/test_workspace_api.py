@@ -1,4 +1,3 @@
-import pandas as pd
 from fastapi.testclient import TestClient
 
 from api import workspace
