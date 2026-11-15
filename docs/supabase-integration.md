@@ -45,8 +45,9 @@ The shared-project bootstrap is kept separate from Supabase's global migration h
 
 - Canonical shared-schema bootstrap: `database/cybersentinel/001_init.sql`.
 - Tenant-integrity hardening: `database/cybersentinel/002_replay_owner_integrity.sql`.
+- Replay foreign-key indexes: `database/cybersentinel/003_replay_fk_indexes.sql`.
 - Project-local ledger: `cybersentinel.schema_migrations`.
-- Current project-local version: `20261115010413`.
+- Current project-local version: `20261115013000`.
 
 The Supabase migration runner also records subsequent DDL migrations in its project-level migration history; the DDL itself is restricted to `cybersentinel`. The older `supabase/migrations/` files describe the retired, dedicated `jai-hack` project schema and remain as historical migration records. Do not apply those public-schema migrations to `common 1`; use the isolated `database/cybersentinel/` migrations instead.
 
@@ -68,4 +69,4 @@ The Model Intelligence view can save a compact evaluation snapshot to `cybersent
 
 ## Database performance
 
-The user ownership foreign key on `cybersentinel.agent2_inference_events.user_id` is indexed to keep per-user audit reads and cascading deletes efficient.
+The user ownership foreign key on `cybersentinel.agent2_inference_events.user_id` is indexed to keep per-user audit reads and cascading deletes efficient. Each replay child table also has a `(run_id, user_id)` index covering its composite tenant-ownership foreign key. This supports efficient parent deletion and referential-integrity checks without weakening the tenant boundary.
