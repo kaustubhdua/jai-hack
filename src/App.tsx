@@ -21,6 +21,7 @@ const ReplayStudio = lazy(() => import("./Level2Consoles").then(module => ({ def
 const ModelIntelligenceView = lazy(() => import("./Level2Consoles").then(module => ({ default: module.ModelIntelligenceView })));
 const AuditHistoryView = lazy(() => import("./Level2Consoles").then(module => ({ default: module.AuditHistoryView })));
 const SystemHealthView = lazy(() => import("./Level2Consoles").then(module => ({ default: module.SystemHealthView })));
+const UniversalWorkspace = lazy(() => import("./UniversalWorkspace"));
 
 type Health = {
   status: string;
@@ -223,6 +224,7 @@ export default function App() {
         ["Adaptive Defense", ShieldAlert],
         ["Replay Studio", Play],
         ["Model Intelligence", Cpu],
+        ["Universal Data Lab", Database],
         ["Local Replay History", Database],
         ["Settings & Health", SlidersHorizontal],
       ].map(([name, Icon]: any) => (
@@ -423,6 +425,7 @@ export default function App() {
         {activeNav === "Adaptive Defense" && <AdaptiveDefenseConsole />}
         {activeNav === "Replay Studio" && <ReplayStudio modelReady={Boolean(health?.model_ready)} />}
         {activeNav === "Model Intelligence" && <ModelIntelligenceView />}
+        {activeNav === "Universal Data Lab" && <UniversalWorkspace />}
         {activeNav === "Local Replay History" && <AuditHistoryView />}
         {activeNav === "Settings & Health" && <SystemHealthView health={health} />}
 
