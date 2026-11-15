@@ -17,7 +17,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from cybersentinel.data.adapters import load_dataset
+from cybersentinel.data.adapters import DATASET_PROFILES, load_dataset
 from cybersentinel.experiments.pipeline import ExperimentConfig, train_experiment, evaluate_cross_dataset
 from cybersentinel.experiments.store import ExperimentStore
 from cybersentinel.integrations.logs import load_zeek_conn, load_suricata_eve, load_wazuh_alerts, load_sigma_rule
@@ -59,6 +59,8 @@ def _load_uploaded_dataset(dataset_id: str):
             dataset_type = metadata.get("manifest", {}).get("dataset_type", metadata.get("source", "auto"))
         except (OSError, json.JSONDecodeError, AttributeError):
             dataset_type = "auto"
+    if dataset_type not in DATASET_PROFILES:
+        dataset_type = "auto"
     return load_dataset(path, dataset_type)
 
 
