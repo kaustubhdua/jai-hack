@@ -54,6 +54,7 @@ def evaluate_anomaly_detector(
     operational_threshold: float,
     is_anomaly_flags: list[bool] | np.ndarray | None = None,
     classes: tuple[str, ...] = BENCHMARK_CLASSES,
+    higher_score_is_anomaly: bool = False,
 ) -> dict[str, Any]:
     """Evaluate Isolation Forest anomaly detector thoroughly."""
     y_true_list = [str(y).strip() for y in y_true]
@@ -65,9 +66,9 @@ def evaluate_anomaly_detector(
     # Ground truth: 1 for any attack class, 0 for BENIGN
     y_binary = np.array([1 if y != "BENIGN" else 0 for y in y_true_list], dtype=int)
 
-    # CRITICAL: Isolation Forest decision_function assigns LOWER scores to more anomalous flows.
-    # We must reverse the score when computing ROC and PR curves so higher = more anomalous!
-    anomaly_likelihood = -scores
+    # Raw Isolation Forest decision_function is lower for anomalies. The agent
+    # contract exposes a normalized anomaly index, where higher means anomalous.
+    anomaly_likelihood = scores if higher_score_is_anomaly else -scores
 
     # 1. ROC-AUC and Curve
     roc_auc = float(roc_auc_score(y_binary, anomaly_likelihood))
@@ -91,11 +92,10 @@ def evaluate_anomaly_detector(
     ]
 
     # 3. Anomaly Probabilities (threshold = 0.5 decision boundary)
-    probabilities = raw_to_anomaly_probability(scores, threshold=operational_threshold)
-    prob_flags = (probabilities > 0.5).astype(int)
-
     if is_anomaly_flags is not None:
         operational_flags = np.asarray(is_anomaly_flags, dtype=bool)
+    elif higher_score_is_anomaly:
+        operational_flags = scores >= operational_threshold
     else:
         operational_flags = scores <= operational_threshold
 
@@ -131,11 +131,12 @@ def evaluate_anomaly_detector(
         }
 
     # 6. Threshold Sweep Analysis
-    sweep_thresholds = np.linspace(np.percentile(scores, 0.5), np.percentile(scores, 30), 20)
+    sweep_percentiles = (70, 99.5) if higher_score_is_anomaly else (0.5, 30)
+    sweep_thresholds = np.linspace(np.percentile(scores, sweep_percentiles[0]), np.percentile(scores, sweep_percentiles[1]), 20)
     threshold_sweep = []
     for t in sweep_thresholds:
         t_val = float(t)
-        t_pred = (scores <= t_val).astype(int)
+        t_pred = (scores >= t_val).astype(int) if higher_score_is_anomaly else (scores <= t_val).astype(int)
         t_fpr = float(np.sum((y_binary == 0) & (t_pred == 1)) / max(1, tn + fp))
         t_rec = float(recall_score(y_binary, t_pred, zero_division=0))
         t_prec = float(precision_score(y_binary, t_pred, zero_division=0))
@@ -152,6 +153,7 @@ def evaluate_anomaly_detector(
         "total_samples": total_samples,
         "operational_threshold": float(round(operational_threshold, 6)),
         "probability_decision_boundary": 0.5,
+        "score_direction": "higher_is_more_anomalous" if higher_score_is_anomaly else "lower_is_more_anomalous",
         "roc_auc": float(round(roc_auc, 6)),
         "average_precision_pr_auc": float(round(pr_auc, 6)),
         "operational_metrics": {
@@ -185,24 +187,23 @@ def evaluate_anomaly_detection(
     # Run score_frame or score
     if hasattr(anomaly_agent, "score_frame"):
         results = anomaly_agent.score_frame(eval_df)
-        raw_scores = [r.anomaly_score if r.anomaly_score is not None else 0.0 for r in results]
+        anomaly_scores = [r.anomaly_score if r.anomaly_score is not None else 0.0 for r in results]
         flags = [r.is_anomaly if r.is_anomaly is not None else False for r in results]
     else:
         results = [anomaly_agent.score(row.to_dict()) for _, row in eval_df.iterrows()]
-        raw_scores = [r.anomaly_score if r.anomaly_score is not None else 0.0 for r in results]
+        anomaly_scores = [r.anomaly_score if r.anomaly_score is not None else 0.0 for r in results]
         flags = [r.is_anomaly if r.is_anomaly is not None else False for r in results]
 
-    op_thresh = threshold if threshold is not None else getattr(anomaly_agent, "threshold", 0.0)
-    if op_thresh is None:
-        op_thresh = 0.0
-
+    # Agent score() exposes a normalized [0,1] anomaly index; high means anomalous.
     res = evaluate_anomaly_detector(
         y_true=y_true,
-        raw_scores=raw_scores,
-        operational_threshold=op_thresh,
+        raw_scores=anomaly_scores,
+        operational_threshold=0.5,
         is_anomaly_flags=flags,
+        higher_score_is_anomaly=True,
     )
-    res["score_inverted"] = True
+    res["score_inverted"] = False
+    res["model_raw_decision_threshold"] = getattr(anomaly_agent, "threshold", None)
     res["average_precision"] = res["average_precision_pr_auc"]
     res["per_attack_class_recall"] = {
         k: v["anomaly_rate"] for k, v in res["per_class_recalls"].items() if k != "BENIGN"
