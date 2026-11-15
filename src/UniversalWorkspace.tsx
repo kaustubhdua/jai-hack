@@ -159,6 +159,7 @@ export default function UniversalWorkspace() {
           <div className="uw-stat-row"><span>Label field</span><b>{profile.label_column ?? "None"}</b><span>Duplicate rows</span><b>{profile.duplicate_rows ?? "—"}</b></div>
           <small>SHA-256: {profile.sha256 ?? "available in dataset manifest"}</small>
           {profile.label_distribution && <div className="uw-labels">{Object.entries(profile.label_distribution).slice(0,12).map(([name,count])=><span key={name}>{name}<b>{Number(count).toLocaleString()}</b></span>)}</div>}
+          {Array.isArray(profile.schema) && <div className="uw-schema"><b>Schema preview</b><div className="uw-schema-scroll"><table><thead><tr><th>Feature</th><th>Type</th><th>Missing</th><th>Unique</th></tr></thead><tbody>{profile.schema.slice(0,20).map((column:any)=><tr key={column.name}><td>{column.name}</td><td>{column.dtype}</td><td>{column.missing}</td><td>{column.unique}</td></tr>)}</tbody></table></div></div>}
         </div>}
       </section>
 
