@@ -38,8 +38,8 @@ from api.workspace import router as workspace_router
 
 app = FastAPI(
     title="CyberSentinel API",
-    version="1.0.0",
-    description="Offline 5-agent network-flow intrusion detection and adaptive defense replay system.",
+    version="2.0.0",
+    description="Offline-first open-data cybersecurity analytics, model experiments, telemetry ingestion, and multi-agent network-flow replay.",
 )
 app.include_router(evaluation_router)
 app.include_router(workspace_router)
