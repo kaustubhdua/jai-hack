@@ -7,6 +7,7 @@ labels, downloads datasets, or silently converts attack taxonomies.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,7 @@ from typing import Any
 import pandas as pd
 
 LABEL_CANDIDATES = (
-    "label", " Label", "class", "attack", "attack_cat", "category",
+    "attack_cat", " Label", "label", "type", "class", "attack", "category",
     "target", "ground_truth", "groundtruth",
 )
 
@@ -98,6 +99,11 @@ def main() -> int:
     args = parser.parse_args()
 
     report = profile_frame(read_dataset(args.dataset), args.label_column)
+    digest = hashlib.sha256()
+    with args.dataset.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    report["source"] = {"path": str(args.dataset.resolve()), "sha256": digest.hexdigest()}
     rendered = json.dumps(report, indent=2, ensure_ascii=False)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
