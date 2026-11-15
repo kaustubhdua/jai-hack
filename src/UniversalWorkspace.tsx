@@ -1,0 +1,158 @@
+import { useCallback, useEffect, useState } from "react";
+import { Activity, AlertTriangle, ArrowDownToLine, Database, FileUp, FlaskConical, RefreshCw, ShieldCheck } from "lucide-react";
+import { apiFetch } from "./lib/api";
+
+type Dataset = { dataset_id: string; original_filename: string; profile?: any };
+type Experiment = { id: number; name: string; status: string; created_at: string; manifest: any };
+
+async function payload(response: Response) {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message ?? "Workspace request failed.");
+  return data;
+}
+
+export default function UniversalWorkspace() {
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [selected, setSelected] = useState("");
+  const [target, setTarget] = useState("");
+  const [experiment, setExperiment] = useState("");
+  const [label, setLabel] = useState("label");
+  const [model, setModel] = useState("random_forest");
+  const [mapping, setMapping] = useState("");
+  const [profile, setProfile] = useState<any>(null);
+  const [result, setResult] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    try {
+      const [d, e] = await Promise.all([
+        payload(await apiFetch("/api/workspace/datasets")),
+        payload(await apiFetch("/api/workspace/experiments")),
+      ]);
+      setDatasets(d.datasets ?? []);
+      setExperiments(e.experiments ?? []);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load local workspace."); }
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function upload(file?: File) {
+    if (!file) return;
+    setBusy(true); setError(""); setResult(null);
+    try {
+      const body = new FormData(); body.append("file", file);
+      const data = await payload(await apiFetch("/api/workspace/datasets", { method: "POST", body }));
+      await refresh();
+      setSelected(data.dataset_id); setTarget(data.dataset_id); setProfile(data);
+    } catch (err) { setError(err instanceof Error ? err.message : "Upload failed."); }
+    finally { setBusy(false); }
+  }
+
+  async function inspect() {
+    if (!selected) return;
+    setBusy(true); setError("");
+    try { setProfile(await payload(await apiFetch(`/api/workspace/datasets/${selected}/profile`))); }
+    catch (err) { setError(err instanceof Error ? err.message : "Inspection failed."); }
+    finally { setBusy(false); }
+  }
+
+  async function train() {
+    if (!selected) return;
+    setBusy(true); setError(""); setResult(null);
+    try {
+      let label_mapping;
+      if (mapping.trim()) label_mapping = JSON.parse(mapping);
+      const data = await payload(await apiFetch("/api/workspace/train", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataset_id: selected, label_column: label, model, label_mapping }),
+      }));
+      setResult(data); setExperiment(String(data.experiment_id)); await refresh();
+    } catch (err) { setError(err instanceof Error ? err.message : "Training failed."); }
+    finally { setBusy(false); }
+  }
+
+  async function evaluate() {
+    if (!experiment || !target) return;
+    setBusy(true); setError(""); setResult(null);
+    try {
+      let label_mapping;
+      if (mapping.trim()) label_mapping = JSON.parse(mapping);
+      setResult(await payload(await apiFetch("/api/workspace/evaluate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ experiment_id: Number(experiment), dataset_id: target, label_column: label, label_mapping }),
+      })));
+    } catch (err) { setError(err instanceof Error ? err.message : "Evaluation failed."); }
+    finally { setBusy(false); }
+  }
+
+  async function detect() {
+    if (!experiment || !target) return;
+    setBusy(true); setError(""); setResult(null);
+    try { setResult(await payload(await apiFetch(`/api/workspace/detect/${experiment}?dataset_id=${target}`, { method: "POST" }))); }
+    catch (err) { setError(err instanceof Error ? err.message : "Detection failed."); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="universal-workspace">
+    <div className="uw-intro">
+      <div><span className="uw-kicker">OPEN DATA · EXPERIMENT LAB</span><h2>Universal analyst workspace</h2>
+        <p>Import public datasets, inspect schema and labels, train local models, test across datasets and export reproducible results.</p></div>
+      <button className="secondary-btn" onClick={() => void refresh()}><RefreshCw size={14}/> Refresh</button>
+    </div>
+    {error && <div className="uw-error" role="alert"><AlertTriangle size={16}/>{error}</div>}
+    <div className="uw-grid">
+      <section className="panel uw-panel">
+        <div className="panel-head"><div><div className="panel-kicker">01 · DATA INGESTION</div><h3>Datasets</h3><p>CSV, Parquet or Feather · up to 100 MB per file</p></div><Database size={19}/></div>
+        <label className="uw-upload"><FileUp size={20}/><b>{busy ? "Working…" : "Choose dataset file"}</b><span>Files are stored in the local workspace</span>
+          <input type="file" accept=".csv,.parquet,.pq,.feather,.arrow" disabled={busy} onChange={e => { void upload(e.target.files?.[0]); e.currentTarget.value = ""; }}/>
+        </label>
+        <label className="uw-label">Training dataset</label>
+        <select value={selected} onChange={e => setSelected(e.target.value)}><option value="">Select dataset</option>{datasets.map(d=><option key={d.dataset_id} value={d.dataset_id}>{d.original_filename}</option>)}</select>
+        <button className="secondary-btn" disabled={!selected || busy} onClick={() => void inspect()}>Inspect selected dataset</button>
+        {profile && <div className="uw-profile">
+          <div className="uw-stat-row"><span>Rows</span><b>{Number(profile.rows ?? 0).toLocaleString()}</b><span>Numeric features</span><b>{profile.numeric_columns ?? "—"}</b></div>
+          <div className="uw-stat-row"><span>Label field</span><b>{profile.label_column ?? "None"}</b><span>Duplicate rows</span><b>{profile.duplicate_rows ?? "—"}</b></div>
+          <small>SHA-256: {profile.sha256 ?? "available in dataset manifest"}</small>
+          {profile.label_distribution && <div className="uw-labels">{Object.entries(profile.label_distribution).slice(0,12).map(([name,count])=><span key={name}>{name}<b>{Number(count).toLocaleString()}</b></span>)}</div>}
+        </div>}
+      </section>
+
+      <section className="panel uw-panel">
+        <div className="panel-head"><div><div className="panel-kicker">02 · MODEL EXPERIMENT</div><h3>Train a model</h3><p>Configurable target taxonomy and feature selection</p></div><FlaskConical size={19}/></div>
+        <label className="uw-label">Model family</label>
+        <select value={model} onChange={e => setModel(e.target.value)}>
+          <option value="random_forest">Random Forest</option><option value="xgboost">XGBoost · optional</option>
+          <option value="isolation_forest">Isolation Forest · unsupervised</option><option value="pytorch_mlp">PyTorch MLP · optional</option>
+        </select>
+        <label className="uw-label">Label column</label><input value={label} onChange={e => setLabel(e.target.value)} placeholder="label"/>
+        <label className="uw-label">Explicit label mapping (JSON, optional)</label>
+        <textarea value={mapping} onChange={e => setMapping(e.target.value)} placeholder={'{"Normal":"BENIGN","DoS":"DOS"}'} rows={3}/>
+        <button className="primary-btn" disabled={!selected || busy} onClick={() => void train()}><FlaskConical size={15}/> Train experiment</button>
+        <p className="uw-hint">Mapping is never inferred. Unknown labels fail validation rather than being silently discarded.</p>
+      </section>
+
+      <section className="panel uw-panel">
+        <div className="panel-head"><div><div className="panel-kicker">03 · DOMAIN SHIFT</div><h3>Cross-dataset evaluation</h3><p>Evaluate a trained model on a separate dataset</p></div><Activity size={19}/></div>
+        <label className="uw-label">Trained experiment</label>
+        <select value={experiment} onChange={e => setExperiment(e.target.value)}><option value="">Select experiment</option>{experiments.filter(e=>e.status==="COMPLETED").map(e=><option key={e.id} value={e.id}>#{e.id} · {e.name}</option>)}</select>
+        <label className="uw-label">Target dataset</label>
+        <select value={target} onChange={e => setTarget(e.target.value)}><option value="">Select target dataset</option>{datasets.map(d=><option key={d.dataset_id} value={d.dataset_id}>{d.original_filename}</option>)}</select>
+        <div className="uw-actions"><button className="secondary-btn" disabled={!experiment || !target || busy} onClick={() => void evaluate()}>Evaluate transfer</button><button className="secondary-btn" disabled={!experiment || !target || busy} onClick={() => void detect()}><ShieldCheck size={14}/> Run detection</button></div>
+      </section>
+
+      <section className="panel uw-panel">
+        <div className="panel-head"><div><div className="panel-kicker">04 · EXPERIMENT REGISTRY</div><h3>Local experiment history</h3><p>Model hashes, configuration and dataset provenance</p></div><Database size={19}/></div>
+        {experiments.length ? experiments.slice(0,8).map(item=><button className="uw-experiment" key={item.id} onClick={()=>setExperiment(String(item.id))}><span><b>#{item.id} · {item.name}</b><small>{item.created_at}</small></span><em>{item.status}</em></button>) : <p className="uw-hint">No experiments yet. Train a model to create a reproducible record.</p>}
+      </section>
+    </div>
+    {result && <section className="panel uw-result">
+      <div className="panel-head"><div><div className="panel-kicker">LATEST RESULT</div><h3>Experiment output</h3></div>
+        {result.export && <a className="secondary-btn" href={result.export}><ArrowDownToLine size={14}/> Export CSV</a>}
+      </div>
+      <pre>{JSON.stringify(result, null, 2)}</pre>
+    </section>}
+    <p className="uw-footnote">Privacy boundary: this workspace stores files, models and experiment history on the machine running the API. Hosted serverless storage is ephemeral. Do not upload private telemetry to a public deployment.</p>
+  </div>;
+}
