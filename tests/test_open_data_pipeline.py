@@ -141,7 +141,7 @@ def test_cross_dataset_coverage_does_not_mislabel_missing_classes_as_domain_shif
         "f1": [0, 1, 2, 3, 4, 5],
         "label": ["benign", "benign", "attack", "attack", "scan", "scan"],
     })
-    target = pd.DataFrame({"f1": [0.1, 0.2], "label": ["benign", "benign"]})
+    target = pd.DataFrame({"f1": [2, 3], "label": ["benign", "benign"]})
     train_experiment(train, ExperimentConfig(n_estimators=10), tmp_path)
     report = evaluate_cross_dataset(tmp_path / "model.joblib", target, "label")
     assert report["target_class_coverage"]["unobserved_training_classes"] == ["attack", "scan"]
