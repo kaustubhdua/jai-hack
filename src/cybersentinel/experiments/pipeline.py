@@ -48,6 +48,8 @@ def _sha256(path: Path) -> str:
 
 def _features(frame: pd.DataFrame, config: ExperimentConfig) -> list[str]:
     if config.feature_columns:
+        if config.label_column in config.feature_columns:
+            raise ValueError("The target label column cannot be included in model features.")
         missing = sorted(set(config.feature_columns) - set(frame.columns))
         if missing:
             raise ValueError(f"Configured feature columns are missing: {missing}")
