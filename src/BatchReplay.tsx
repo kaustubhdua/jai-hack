@@ -126,7 +126,6 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
         actions: { ...aggregate.actions },
         results: [...aggregate.results],
         class_counts: { ...aggregate.class_counts },
-        supabase_persistence: aggregate.supabase_persistence ? { ...aggregate.supabase_persistence } : undefined,
       });
     };
 
