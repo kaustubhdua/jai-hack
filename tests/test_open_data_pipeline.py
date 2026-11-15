@@ -36,6 +36,23 @@ def test_cic_duration_is_normalized_from_microseconds_to_seconds():
     assert frame["flow_duration"].iloc[0] == 1.0
 
 
+def test_explicit_feature_allowlist_rejects_target_leakage():
+    frame = pd.DataFrame({"feature": [1, 2], "label": ["a", "b"]})
+    config = ExperimentConfig(label_column="label", feature_columns=["feature", "label"])
+    with pytest.raises(ValueError, match="target label column"):
+        train_experiment(frame, config, "unused-model-output")
+
+
+def test_isolation_forest_runs_without_labels(tmp_path):
+    frame = pd.DataFrame({"f1": [0, 1, 2, 3, 4], "f2": [2, 1, 2, 1, 2]})
+    config = ExperimentConfig(model="isolation_forest", n_estimators=10)
+    manifest = train_experiment(frame, config, tmp_path)
+    assert manifest["scoring_mode"] == "unsupervised_anomaly"
+    report = evaluate_cross_dataset(tmp_path / "model.joblib", frame, "label")
+    assert report["mode"] == "unsupervised_anomaly"
+    assert report["rows"] == 5
+
+
 def test_explicit_mapping_rejects_unknown_source_labels():
     with pytest.raises(ValueError, match="does not cover"):
         from cybersentinel.experiments.pipeline import _mapped_labels
@@ -65,6 +82,9 @@ def test_suricata_and_wazuh_ingestion(tmp_path):
     wazuh.write_text(json.dumps({"alerts": [{"timestamp": "2025-01-01T00:00:00Z",
         "agent": {"id": "001"}, "rule": {"id": "5710", "level": 5}}]}), encoding="utf-8")
     assert load_wazuh_alerts(wazuh).iloc[0]["rule_id"] == "5710"
+    single = tmp_path / "single-wazuh.json"
+    single.write_text(json.dumps({"timestamp": "2025-01-01T00:00:00Z", "rule": {"id": "1001"}}), encoding="utf-8")
+    assert load_wazuh_alerts(single).iloc[0]["rule_id"] == "1001"
 
 
 def test_zeek_conn_header_parser(tmp_path):
