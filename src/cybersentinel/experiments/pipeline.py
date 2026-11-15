@@ -234,11 +234,16 @@ def train_experiment(
                  "training_stats": training_stats,
                  "classes": sorted(labels.unique().tolist()) if labels is not None else None}, model_path)
     manifest = {
-        "artifact_version": 1, "model": config.model, "config": asdict(config), "features": columns,
+        "artifact_version": 1, "model_version": "cybersentinel-experiment-v1",
+        "model": config.model, "config": asdict(config), "features": columns,
         "classes": sorted(labels.unique().tolist()) if labels is not None else None,
         "training_rows": int(len(training)), "dataset": dataset_manifest or {},
         "model_path": str(model_path), "model_sha256": _sha256(model_path),
-        "runtime": {"python": platform.python_version(), "pandas": pd.__version__, "scikit_learn": sklearn.__version__},
+        "runtime": {
+            "python": platform.python_version(), "pandas": pd.__version__,
+            "numpy": np.__version__, "scikit_learn": sklearn.__version__,
+            "joblib": joblib.__version__,
+        },
         "scoring_mode": "classification" if labels is not None else "unsupervised_anomaly",
     }
     (output / "experiment.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
