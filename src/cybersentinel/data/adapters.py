@@ -111,7 +111,7 @@ def normalize_dataset(
     # artifact preserves the second measurement as this stable feature name.
     if dataset_type.casefold() in {"cic-ids2017", "cse-cic-ids2018"}:
         for column in source_columns:
-            match = re.fullmatch(r"Fwd Header Length\\.(\\d+)", str(column), flags=re.IGNORECASE)
+            match = re.fullmatch(r"Fwd Header Length\.(\d+)", str(column), flags=re.IGNORECASE)
             if match:
                 suffix = max(0, int(match.group(1)) - 1)
                 canonical_duplicate = f"Fwd Header Length_duplicated_{suffix}"
