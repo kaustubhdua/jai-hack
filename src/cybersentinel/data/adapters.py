@@ -5,7 +5,7 @@ rewrite source labels into a shared taxonomy unless the caller supplies a map.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -23,8 +23,12 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "destination_ip": ("destination ip", "dst ip", "dst_ip", "dstip"),
     "timestamp": ("timestamp", "stime", "start time", "flow start"),
     "label": ("label", " Label", "attack", "attack_cat", "category", "type"),
-    "flow_bytes": ("flow bytes/s", "flow_byts/s", "totlen_fwd_pkts", "totlen_bwd_pkts"),
-    "flow_packets": ("flow packets/s", "flow_pkts/s", "total fwd packets", "total backward packets"),
+    "fwd_packets": ("total fwd packets", "tot fwd pkts", "spkts", "src_pkts"),
+    "bwd_packets": ("total backward packets", "total bwd packets", "dpkts", "dst_pkts"),
+    "fwd_bytes": ("total length of fwd packets", "totlen_fwd_pkts", "sbytes", "src_bytes", "orig_bytes"),
+    "bwd_bytes": ("total length of bwd packets", "totlen_bwd_pkts", "dbytes", "dst_bytes", "resp_bytes"),
+    "flow_bytes_per_second": ("flow bytes/s", "flow_byts/s"),
+    "flow_packets_per_second": ("flow packets/s", "flow_pkts/s"),
 }
 
 DATASET_PROFILES: dict[str, dict[str, Any]] = {
@@ -64,9 +68,14 @@ class DatasetBundle:
     warnings: list[str]
 
     def manifest(self) -> dict[str, Any]:
-        result = asdict(self)
-        result.pop("frame")
-        return result
+        return {
+            "source_path": self.source_path, "source_sha256": self.source_sha256,
+            "format": self.format, "dataset_type": self.dataset_type,
+            "rows": self.rows, "columns": self.columns,
+            "label_column": self.label_column,
+            "normalized_columns": self.normalized_columns,
+            "warnings": self.warnings,
+        }
 
 
 def _read(path: Path) -> pd.DataFrame:
@@ -97,14 +106,25 @@ def normalize_dataset(
     for canonical, aliases in ALIASES.items():
         if canonical == "label" and label_column:
             candidate = label_column
+        elif canonical == "label":
+            candidate = next((by_key.get(_key(name)) for name in profile["label_candidates"] if by_key.get(_key(name)) is not None), None)
+            if candidate is None:
+                candidate = next((by_key.get(_key(alias)) for alias in aliases if by_key.get(_key(alias)) is not None), None)
         else:
             candidate = next((by_key.get(_key(alias)) for alias in aliases if by_key.get(_key(alias)) is not None), None)
-            if candidate is None:
-                candidate = next((by_key.get(_key(name)) for name in profile["label_candidates"] if by_key.get(_key(name)) is not None), None) if canonical == "label" else None
         if candidate is not None and candidate in normalized.columns and candidate != canonical:
             if canonical not in normalized.columns:
                 rename[candidate] = canonical
     normalized = normalized.rename(columns=rename)
+    # CIC flow-duration fields are recorded in microseconds; the shared
+    # canonical unit is seconds (UNSW dur and common IoT durations use seconds).
+    if dataset_type.casefold() in {"cic-ids2017", "cse-cic-ids2018"} and "flow_duration" in normalized.columns:
+        normalized["flow_duration"] = pd.to_numeric(normalized["flow_duration"], errors="coerce") / 1_000_000.0
+    if "protocol" in normalized.columns:
+        protocol = normalized["protocol"]
+        protocol_map = {"tcp": 6, "udp": 17, "icmp": 1, "icmpv6": 58}
+        converted = pd.to_numeric(protocol, errors="coerce")
+        normalized["protocol"] = converted.fillna(protocol.astype("string").str.strip().str.casefold().map(protocol_map))
     resolved_label = "label" if "label" in normalized.columns else None
     if label_column and label_column in normalized.columns:
         resolved_label = label_column
