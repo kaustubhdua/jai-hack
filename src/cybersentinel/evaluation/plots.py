@@ -81,8 +81,12 @@ def generate_all_plots(
         try:
             fig, axes = plt.subplots(1, 2, figsize=(14, 6))
             roc_curve = anomaly_data.get("roc_curve", {})
-            fpr = roc_curve.get("fpr", [0, 1])
-            tpr = roc_curve.get("tpr", [0, 1])
+            if isinstance(roc_curve, list):
+                fpr = [point.get("fpr", 0.0) for point in roc_curve]
+                tpr = [point.get("tpr", 0.0) for point in roc_curve]
+            else:
+                fpr = roc_curve.get("fpr", [0, 1])
+                tpr = roc_curve.get("tpr", [0, 1])
             roc_auc = anomaly_data.get("roc_auc", 0.5)
 
             axes[0].plot(fpr, tpr, color="#2563eb", lw=2, label=f"Isolation Forest (AUC = {roc_auc:.4f})")
@@ -95,10 +99,14 @@ def generate_all_plots(
             axes[0].grid(True, alpha=0.3)
             axes[0].legend(loc="lower right")
 
-            pr_curve = anomaly_data.get("precision_recall_curve", {})
-            precision = pr_curve.get("precision", [1, 0])
-            recall = pr_curve.get("recall", [0, 1])
-            ap = anomaly_data.get("average_precision", 0.0)
+            pr_curve = anomaly_data.get("pr_curve", anomaly_data.get("precision_recall_curve", {}))
+            if isinstance(pr_curve, list):
+                precision = [point.get("precision", 0.0) for point in pr_curve]
+                recall = [point.get("recall", 0.0) for point in pr_curve]
+            else:
+                precision = pr_curve.get("precision", [1, 0])
+                recall = pr_curve.get("recall", [0, 1])
+            ap = anomaly_data.get("average_precision", anomaly_data.get("average_precision_pr_auc", 0.0))
 
             axes[1].plot(recall, precision, color="#10b981", lw=2, label=f"PR Curve (AP = {ap:.4f})")
             axes[1].set_xlim([0.0, 1.0])
@@ -132,13 +140,15 @@ def generate_all_plots(
             ax.plot([0, 1], [0, 1], color="#94a3b8", linestyle="--", label="Perfect Calibration")
 
             if uncal_bins:
-                u_conf = [b["mean_predicted_probability"] for b in uncal_bins]
-                u_acc = [b["empirical_accuracy"] for b in uncal_bins]
+                populated = [b for b in uncal_bins if b.get("sample_count", 1) > 0]
+                u_conf = [b.get("mean_confidence", b.get("mean_predicted_probability", 0.0)) for b in populated]
+                u_acc = [b.get("observed_accuracy", b.get("empirical_accuracy", 0.0)) for b in populated]
                 ax.plot(u_conf, u_acc, marker="o", color="#ef4444", label=f"Uncalibrated (ECE = {uncal.get('ece', 0):.4f})")
 
             if cal_bins:
-                c_conf = [b["mean_predicted_probability"] for b in cal_bins]
-                c_acc = [b["empirical_accuracy"] for b in cal_bins]
+                populated = [b for b in cal_bins if b.get("sample_count", 1) > 0]
+                c_conf = [b.get("mean_confidence", b.get("mean_predicted_probability", 0.0)) for b in populated]
+                c_acc = [b.get("observed_accuracy", b.get("empirical_accuracy", 0.0)) for b in populated]
                 ax.plot(c_conf, c_acc, marker="s", color="#10b981", label=f"Calibrated (ECE = {cal.get('ece', 0):.4f})")
 
             ax.set_xlabel("Mean Predicted Confidence")
