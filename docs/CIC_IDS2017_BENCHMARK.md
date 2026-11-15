@@ -6,7 +6,7 @@
 
 - Dataset mirror used in the prepared workspace: `bvsam/cic-ids-2017` on Hugging Face.
 - Upstream dataset: Canadian Institute for Cybersecurity (CIC) IDS 2017.
-- The mirror's dataset card did not declare a reuse license when checked. Confirm the original UNB/CIC terms before redistribution or commercial use. Do not redistribute source rows or artifacts until the license is confirmed.
+- The Hugging Face mirror's dataset card did not declare a reuse license when checked. The [official CIC provider page](https://www.unb.ca/cic/datasets/ids-2017.html) describes the data as publicly available for researchers and requests citation of the source paper, but does not grant a broad commercial or redistribution license. Treat it as research-use data, cite the source paper, and do not redistribute raw rows/PCAPs unless the provider's terms expressly permit it.
 - Canonical classes: `BENIGN`, `BRUTE_FORCE`, `DOS`, `DDOS`, `PORT_SCAN`.
 - Prepared evaluation partition: 2,500 flows (500 per class). Prepared training partition: 10,000 flows. The prepared files are not committed to the repository.
 - Deterministic sampling/split used seed 42; the evaluation runner validates the five expected classes and records dataset/model hashes.
