@@ -27,6 +27,13 @@ def test_dataset_loader_hashes_original_file(tmp_path):
     assert bundle.dataset_type == "unsw-nb15"
     assert len(bundle.source_sha256) == 64
     assert bundle.label_column == "label"
+    assert bundle.frame["label"].tolist() == ["Normal", "DoS"]
+
+
+def test_cic_duration_is_normalized_from_microseconds_to_seconds():
+    source = pd.DataFrame({"Flow Duration": [1_000_000], " Label": ["BENIGN"]})
+    frame, _, _, _ = normalize_dataset(source, "cic-ids2017")
+    assert frame["flow_duration"].iloc[0] == 1.0
 
 
 def test_explicit_mapping_rejects_unknown_source_labels():
