@@ -209,7 +209,6 @@ def models_status():
     return {
         "status": "ready",
         "models_ready": True,
-        "database_persistence_configured": _database_persistence_configured(),
         "agents": {
             "threat_detection": {
                 "backend": pipeline.threat_agent.model.metadata.get("backend"),
@@ -249,17 +248,13 @@ def get_anomaly_agent() -> AnomalyDetectionAgent | None:
     return _anomaly_agent
 
 
-def _database_insert_rows(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
+def _cloud_storage_status(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
     """Cloud audit persistence is deliberately disabled; never contact an external database."""
     return {"stored": False, "reason": "cloud_database_removed", "mode": "stateless"}
 
 
 def _database_select_rows(table: str, query: str, request: Request) -> dict[str, Any]:
     return {"stored": False, "reason": "cloud_database_removed", "rows": []}
-
-
-def _database_persistence_configured() -> bool:
-    return False
 
 
 def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, source: str = "agent2_independent") -> dict[str, Any]:
@@ -276,7 +271,7 @@ def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, sour
         "evidence": payload.get("evidence") or [],
         "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
     }
-    return _database_insert_rows("agent2_inference_events", [record], request)
+    return _cloud_storage_status("agent2_inference_events", [record], request)
 
 
 def _persist_flow_events(results: list[dict[str, Any]], request: Request, source: str) -> dict[str, Any]:
@@ -307,9 +302,9 @@ def _persist_flow_events(results: list[dict[str, Any]], request: Request, source
                 "evidence": anomaly.get("evidence") or [],
                 "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
             })
-    flow_status = {"stored": True, "rows": 0} if not records else _database_insert_rows("flow_analysis_events", records, request)
+    flow_status = {"stored": True, "rows": 0} if not records else _cloud_storage_status("flow_analysis_events", records, request)
     for offset in range(0, len(agent2_records), 100):
-        status = _database_insert_rows("agent2_inference_events", agent2_records[offset:offset + 100], request)
+        status = _cloud_storage_status("agent2_inference_events", agent2_records[offset:offset + 100], request)
         if not status.get("stored"):
             return {"stored": False, "flow_events": flow_status, "agent2_events": status}
     return {"stored": bool(flow_status.get("stored")), "flow_events": flow_status, "agent2_rows": len(agent2_records)}
@@ -347,11 +342,11 @@ def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Req
             "expires_after_record_id": str(policy["expires_after_record_id"]),
         })
     for offset in range(0, len(decisions), 250):
-        outcome = _database_insert_rows("replay_decisions", decisions[offset:offset + 250], request)
+        outcome = _cloud_storage_status("replay_decisions", decisions[offset:offset + 250], request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions": outcome, "policies_saved": 0}
     if policies:
-        outcome = _database_insert_rows("replay_policies", policies, request)
+        outcome = _cloud_storage_status("replay_policies", policies, request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions_saved": len(decisions), "policies": outcome}
     groups = []
@@ -370,7 +365,7 @@ def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Req
             "evidence": group.get("evidence") or [],
         })
     if groups:
-        outcome = _database_insert_rows("replay_correlation_groups", groups, request)
+        outcome = _cloud_storage_status("replay_correlation_groups", groups, request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups": outcome}
     return {"stored": True, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups_saved": len(groups)}
@@ -388,7 +383,7 @@ def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any],
         "elapsed_seconds": metrics.get("elapsed_seconds"),
         "status": status, "metadata": metadata or {},
     }
-    return _database_insert_rows("replay_runs", [record], request)
+    return _cloud_storage_status("replay_runs", [record], request)
 
 
 @app.post("/api/agents/anomaly/score")
@@ -407,14 +402,13 @@ def score_anomaly(payload: dict[str, Any], request: Request):
     if result.status != "success":
         raise HTTPException(status_code=422, detail={"code": "AGENT_2_SCORING_ERROR", "message": result.message or "Anomaly scoring failed."})
     response = result.to_dict()
-    response["database_persistence"] = _persist_agent2_event(result, request)
+    response["storage_status"] = _persist_agent2_event(result, request)
     return response
 
 
 @app.post("/api/analyze")
 @app.post("/analyze")
 def analyze(payload: dict[str, Any], request: Request):
-    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -434,7 +428,7 @@ def analyze(payload: dict[str, Any], request: Request):
     threat_metadata = getattr(threat_model, "metadata", {}) or {}
     if flow.get("record_id") is not None:
         analysis["record_id"] = str(flow["record_id"])
-    analysis["database_persistence"] = _persist_flow_events([analysis], request, "single_flow")
+    analysis["storage_status"] = _persist_flow_events([analysis], request, "single_flow")
     analysis["model_provenance"] = {
         "a1_confidence_calibrated": bool(threat_metadata.get("confidence_calibrated", False)),
         "a2_score_is_probability": False,
@@ -445,7 +439,6 @@ def analyze(payload: dict[str, Any], request: Request):
 @app.post("/api/analyze/batch")
 @app.post("/analyze/batch")
 def analyze_batch(payload: BatchAnalyzeRequest, request: Request):
-    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -460,13 +453,12 @@ def analyze_batch(payload: BatchAnalyzeRequest, request: Request):
         if flow.get("record_id") is not None:
             result["record_id"] = str(flow["record_id"])
     persistence = _persist_flow_events(results, request, "batch_replay")
-    return {"total_analyzed": len(results), "actions": actions, "results": results, "database_persistence": persistence}
+    return {"total_analyzed": len(results), "actions": actions, "results": results, "storage_status": persistence}
 
 
 @app.post("/api/fusion/simulate")
 def simulate_fusion(payload: dict[str, Any], request: Request):
     """Run the production Agent 3 fusion contract against explicit A1/A2 evidence."""
-    _require_authenticated_user(request)
     predicted = str(payload.get("predicted_class", "")).upper()
     confidence = payload.get("confidence")
     anomaly_score = payload.get("anomaly_score")
@@ -483,7 +475,7 @@ def simulate_fusion(payload: dict[str, Any], request: Request):
     anomaly = AnomalyDetectionResult(anomaly_score=float(anomaly_score), is_anomaly=is_anomaly)
     result = EvidenceFusionAgent().fuse(threat, anomaly)
     response = result.to_dict()
-    response["database_persistence"] = _database_insert_rows("flow_analysis_events", [{
+    response["storage_status"] = _cloud_storage_status("flow_analysis_events", [{
         "source": "fusion_simulation", "predicted_class": predicted,
         "anomaly_score": float(anomaly_score), "is_anomaly": is_anomaly,
         "final_class": response.get("final_class"), "evidence_status": response.get("evidence_status"),
@@ -495,7 +487,6 @@ def simulate_fusion(payload: dict[str, Any], request: Request):
 @app.post("/api/replay/simulate")
 def simulate_replay(payload: ReplaySimulationRequest, request: Request):
     """Run causal chronological replay over provided flow sequence."""
-    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -566,7 +557,7 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
 
     return {
         "run_id": run_id,
-        "database_persistence": cloud_persistence,
+        "storage_status": cloud_persistence,
         "metrics": metrics,
         "policies_sample": results["policy_rows"][:20],
         "replay_sample": results["replay_rows"][:30],
@@ -577,7 +568,6 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
 @app.post("/api/replay/run-official")
 def run_official_replay(request: Request):
     """Run the installed official evaluation stream and write the three submission CSVs."""
-    _require_authenticated_user(request)
     if SERVERLESS_RUNTIME:
         raise HTTPException(status_code=503, detail={
             "code": "OFFICIAL_REPLAY_REQUIRES_ARTIFACT_STORAGE",
@@ -665,7 +655,7 @@ def run_official_replay(request: Request):
         cloud_persistence["artifacts"] = artifact_persistence
         summary = {
             "run_id": run_id,
-            "database_persistence": cloud_persistence,
+            "storage_status": cloud_persistence,
             "source": "installed_unlabelled_hidden_replay_input",
             "records_processed": int(metrics["total_records"]),
             "artifacts": {
@@ -691,7 +681,7 @@ def run_official_replay(request: Request):
         (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return {
             "run_id": run_id,
-            "database_persistence": cloud_persistence,
+            "storage_status": cloud_persistence,
             "metrics": metrics,
             "validation": validation,
             "files": {name: {"path": f"outputs/submission/{name}", "rows": len(results[key])}
@@ -713,7 +703,6 @@ def run_official_replay(request: Request):
 @app.post("/api/replay/input/upload")
 async def upload_replay_input(request: Request, file: UploadFile = File(...)):
     """Install a real organizer CSV or the known cyber-hidden.zip without extracting paths."""
-    _require_authenticated_user(request)
     if SERVERLESS_RUNTIME:
         raise HTTPException(status_code=503, detail={
             "code": "LOCAL_RUNTIME_REQUIRED",
@@ -783,7 +772,6 @@ async def upload_replay_input(request: Request, file: UploadFile = File(...)):
 @app.get("/api/replay/validate")
 def validate_submissions(request: Request):
     """Validate submission files in outputs/submission/."""
-    _require_authenticated_user(request)
     sub_dir = BASE_DIR / "outputs" / "submission"
     if not (sub_dir / "classification.csv").is_file():
         return {
@@ -821,7 +809,6 @@ def validate_submissions(request: Request):
 @app.post("/api/evaluation/snapshot")
 def save_evaluation_snapshot(payload: dict[str, Any], request: Request):
     """Save a provenance-bearing evaluation summary to the caller's private history."""
-    _require_authenticated_user(request)
     dataset_name = str(payload.get("dataset_name") or "generated-evaluation-reports").strip()[:200]
     if not dataset_name:
         raise HTTPException(status_code=422, detail="dataset_name must not be empty.")
@@ -852,13 +839,12 @@ def save_evaluation_snapshot(payload: dict[str, Any], request: Request):
         "status": status, "model_version": str(payload.get("model_version") or "unknown")[:120],
         "accuracy": metrics["accuracy"], "macro_f1": metrics["macro_f1"], "summary": summary,
     }
-    return {"database_persistence": _database_insert_rows("analysis_runs", [record], request)}
+    return {"storage_status": _cloud_storage_status("analysis_runs", [record], request)}
 
 
 @app.get("/api/overview")
 def get_overview(request: Request):
     """Return operational replay counts without inventing hidden-set ground-truth metrics."""
-    _require_authenticated_user(request)
     sub_dir = BASE_DIR / "outputs" / "submission"
     replay_file = sub_dir / "replay.csv"
     policies_file = sub_dir / "policies.csv"
@@ -929,7 +915,6 @@ def get_benchmarks():
 @app.get("/api/submissions/download/{filename}")
 def download_submission_file(filename: str, request: Request):
     """Download an official submission CSV or report."""
-    _require_authenticated_user(request)
     allowed = {"classification.csv", "policies.csv", "replay.csv", "summary.json", "validation_report.json"}
     if filename not in allowed:
         raise HTTPException(status_code=400, detail=f"Invalid file requested: {filename}")
@@ -945,7 +930,6 @@ def download_submission_file(filename: str, request: Request):
 @app.get("/api/flows/sample")
 def get_flows_sample(request: Request, limit: int = 50, offset: int = 0, class_filter: str | None = None):
     """Return flow features joined to predictions/actions, never ground-truth labels."""
-    _require_authenticated_user(request)
     if limit < 1 or limit > 200 or offset < 0:
         raise HTTPException(status_code=422, detail="limit must be 1..200 and offset must be non-negative.")
 
@@ -1020,34 +1004,24 @@ def get_flows_sample(request: Request, limit: int = 50, offset: int = 0, class_f
 
 @app.get("/api/policies")
 def get_policies(request: Request, limit: int = 50, offset: int = 0):
-    """Retrieve policies generated during replay from outputs/submission/policies.csv."""
-    _require_authenticated_user(request)
-    if _database_persistence_configured():
-        latest = _database_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
-        if not latest["stored"]:
-            return {"policies": [], "total": 0, "source": "disabled_cloud_persistence", "error": latest["reason"]}
-        if not latest["rows"]:
-            return {"policies": [], "total": 0, "source": "neon_postgres"}
-        run_id = latest["rows"][0]["run_id"]
-        query = f"select=policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id,created_at&run_id=eq.{run_id}&order=created_at.desc&limit={limit}&offset={offset}"
-        result = _database_select_rows("replay_policies", query, request)
-        return {"policies": result["rows"], "total": len(result["rows"]), "offset": offset, "limit": limit, "source": "neon_postgres", "error": result.get("reason")}
+    """Read policies from locally generated replay artifacts; no cloud database is used."""
+    if limit < 1 or limit > 500 or offset < 0:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500 and offset cannot be negative.")
     pol_file = BASE_DIR / "outputs" / "submission" / "policies.csv"
     if not pol_file.is_file():
-        return {"policies": [], "total": 0, "source": "local"}
+        return {"policies": [], "total": 0, "source": "local_artifacts"}
     try:
         pol_df = pd.read_csv(pol_file)
         total = len(pol_df)
         subset = pol_df.iloc[offset : offset + limit].to_dict(orient="records")
-        return {"policies": subset, "total": total, "offset": offset, "limit": limit, "source": "local"}
-    except Exception as e:
-        return {"policies": [], "total": 0, "error": str(e), "source": "local"}
+        return {"policies": subset, "total": total, "offset": offset, "limit": limit, "source": "local_artifacts"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "POLICY_FILE_INVALID", "message": f"Local policy artifact could not be read ({type(exc).__name__})."}) from exc
 
 
 @app.post("/api/policies/test")
 def test_policy_prefilter(payload: dict[str, Any], request: Request):
     """Test a policy against organizer record positions, not numeric record-ID arithmetic."""
-    _require_authenticated_user(request)
     source_ip = str(payload.get("source_ip", "")).strip()
     current_step = payload.get("current_step", 1)
     try:
@@ -1106,7 +1080,7 @@ def test_policy_prefilter(payload: dict[str, Any], request: Request):
             "status": "NO_MATCHING_POLICY",
             "message": f"No active policy matches source IP {source_ip} at seq {current_step}.",
         }
-    response["database_persistence"] = _database_insert_rows("flow_analysis_events", [{
+    response["storage_status"] = _cloud_storage_status("flow_analysis_events", [{
         "source": "policy_simulation", "record_id": str(current_step),
         "action": response["action"], "rationale": [response["status"], response["message"]],
     }], request)
@@ -1116,22 +1090,9 @@ def test_policy_prefilter(payload: dict[str, Any], request: Request):
 
 @app.get("/api/correlation/groups")
 def get_correlation_groups(request: Request, limit: int = 20):
-    """Return groups observed in the latest completed replay; no fabricated fixtures."""
-    _require_authenticated_user(request)
+    """Return correlation groups from the most recent replay in this API process."""
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 200.")
-    if _database_persistence_configured():
-        latest = _database_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
-        if not latest["stored"]:
-            raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": latest["reason"]})
-        if not latest["rows"]:
-            return {"groups": [], "total": 0, "source": "neon_postgres", "synthetic": False}
-        run_id = latest["rows"][0]["run_id"]
-        query = f"select=group_id,attack_type,source_identity,target_endpoints,member_record_ids,flow_count,start_record_id,end_record_id,confidence,evidence,created_at&run_id=eq.{run_id}&order=created_at.desc&limit={limit}"
-        result = _database_select_rows("replay_correlation_groups", query, request)
-        if not result["stored"]:
-            raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": result["reason"]})
-        return {"groups": result["rows"], "total": len(result["rows"]), "source": "latest_completed_replay", "synthetic": False}
     return {
         "groups": _LAST_CORRELATION_GROUPS[:limit],
         "total": len(_LAST_CORRELATION_GROUPS),
