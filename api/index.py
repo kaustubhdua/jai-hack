@@ -462,7 +462,7 @@ def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any],
 
 
 def _database_persistence_configured() -> bool:
-    return bool(_Neon Postgres_public_key() and _Neon Postgres_project_host())
+    return database_configured()
 
 
 @app.post("/api/agents/anomaly/score")
