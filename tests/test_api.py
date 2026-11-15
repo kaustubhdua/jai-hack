@@ -262,7 +262,6 @@ def test_dedicated_single_flow_function_passes_request_context(monkeypatch):
 def test_dedicated_batch_function_passes_request_context(monkeypatch):
     from api.analyze.batch import app as dedicated_app
 
-    monkeypatch.setattr(index, "_require_authenticated_user", lambda request: None)
     monkeypatch.setattr(index, "get_pipeline", lambda: None)
     response = TestClient(dedicated_app).post("/", json={"flows": [{"Flow Duration": 100}]})
     assert response.status_code == 503
@@ -303,7 +302,7 @@ def test_serverless_replay_is_public_and_does_not_claim_database_persistence(mon
     payload = response.json()
     assert payload["metrics"]["total_records"] == 2
     assert payload["database_persistence"]["stored"] is False
-    assert payload["database_persistence"]["reason"] == "cloud_database_removed"
+    assert payload["database_persistence"]["reason"] == "hosted_persistence_disabled"
     assert payload["database_persistence"]["artifacts"]["stored"] is False
 
 
