@@ -15,8 +15,7 @@ import pandas as pd
 from cybersentinel.agents.correlation import TemporalCorrelationAgent
 
 
-def _prediction(agent: Any, row: dict[str, Any]) -> tuple[str | None, float | None]:
-    result = agent.predict(row)
+def _prediction_result(result: Any) -> tuple[str | None, float | None]:
     predicted_class = getattr(result, "predicted_class", None)
     confidence = getattr(result, "confidence", None)
     status = getattr(result, "status", "success")
@@ -27,6 +26,20 @@ def _prediction(agent: Any, row: dict[str, Any]) -> tuple[str | None, float | No
     except (TypeError, ValueError):
         confidence = None
     return str(predicted_class).strip().upper(), confidence
+
+
+def _prediction(agent: Any, row: dict[str, Any]) -> tuple[str | None, float | None]:
+    return _prediction_result(agent.predict(row))
+
+
+def _predictions(agent: Any, frame: pd.DataFrame) -> list[tuple[str | None, float | None]]:
+    """Use batch inference when supported, preserving one result per input row."""
+    if hasattr(agent, "predict_frame"):
+        results = list(agent.predict_frame(frame))
+        if len(results) != len(frame):
+            raise ValueError("Batch threat predictions must align one-to-one with input rows.")
+        return [_prediction_result(result) for result in results]
+    return [_prediction(agent, row) for row in frame.to_dict(orient="records")]
 
 
 def evaluate_temporal_correlation(
@@ -55,8 +68,9 @@ def evaluate_temporal_correlation(
         order = list(range(len(records)))
         ordering_mode = "input_order_timestamps_incomplete"
 
-    inference_records = [{key: value for key, value in row.items() if key != "label"} for row in records]
-    predictions = [_prediction(threat_agent, inference_records[idx]) for idx in range(len(records))]
+    inference_frame = eval_df.drop(columns=["label"]).copy()
+    inference_records = inference_frame.to_dict(orient="records")
+    predictions = _predictions(threat_agent, inference_frame)
     agent = TemporalCorrelationAgent(window_size=window_size)
     correlated_by_ground_truth: dict[str, int] = {}
     correlated_by_predicted_type: dict[str, int] = {}
