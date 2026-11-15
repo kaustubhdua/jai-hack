@@ -49,6 +49,19 @@ def _dataset_path(dataset_id: str) -> Path:
     return matches[0]
 
 
+def _load_uploaded_dataset(dataset_id: str):
+    path = _dataset_path(dataset_id)
+    metadata_path = UPLOADS / f"{dataset_id}.json"
+    dataset_type = "auto"
+    if metadata_path.is_file():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            dataset_type = metadata.get("manifest", {}).get("dataset_type", metadata.get("source", "auto"))
+        except (OSError, json.JSONDecodeError, AttributeError):
+            dataset_type = "auto"
+    return load_dataset(path, dataset_type)
+
+
 def _profile(path: Path, dataset_type: str = "auto", label_column: str | None = None):
     bundle = load_dataset(path, dataset_type, label_column)
     frame = bundle.frame
@@ -156,7 +169,7 @@ def dataset_profile(dataset_id: str):
 def train(request: TrainRequest):
     _require_local_workspace()
     path = _dataset_path(request.dataset_id)
-    bundle = load_dataset(path)
+    bundle = _load_uploaded_dataset(request.dataset_id)
     config = ExperimentConfig(
         model=request.model, label_column=request.label_column,
         feature_columns=request.feature_columns, drop_columns=request.drop_columns,
@@ -202,7 +215,7 @@ def _experiment_model(experiment_id: int) -> tuple[Path, dict[str, Any]]:
 def evaluate(request: EvaluateRequest):
     _require_local_workspace()
     model_path, experiment = _experiment_model(request.experiment_id)
-    target = load_dataset(_dataset_path(request.dataset_id)).frame
+    target = _load_uploaded_dataset(request.dataset_id).frame
     try:
         report = evaluate_cross_dataset(model_path, target, request.label_column, request.label_mapping)
     except Exception as exc:
@@ -221,7 +234,7 @@ def detect(experiment_id: int, dataset_id: str):
     import joblib
     model_path, _ = _experiment_model(experiment_id)
     bundle = joblib.load(model_path)
-    frame = load_dataset(_dataset_path(dataset_id)).frame
+    frame = _load_uploaded_dataset(dataset_id).frame
     features = bundle["features"]
     missing = sorted(set(features) - set(frame.columns))
     if missing:
