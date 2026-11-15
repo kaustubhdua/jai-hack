@@ -295,6 +295,18 @@ def detect(experiment_id: int, dataset_id: str):
             result["confidence"] = probabilities.max(axis=1)
     benign_labels = {"BENIGN", "NORMAL", "LEGITIMATE", "0", "FALSE", "ALLOW"}
     alerts = result[~result["prediction"].astype(str).str.upper().isin(benign_labels)].copy()
+
+    # Neutralize spreadsheet formulas in untrusted source context before CSV
+    # export; keep numeric negative values numeric and unchanged.
+    def _safe_cell(value):
+        if isinstance(value, str) and re.match(r"^[\\s\\x00-\\x1f]*[=+@-]", value):
+            return "'" + value
+        return value
+
+    for column in result.select_dtypes(include=["object", "string"]).columns:
+        result[column] = result[column].map(_safe_cell)
+    alerts = result[~result["prediction"].astype(str).str.upper().isin(benign_labels)].copy()
+
     output = REPORTS / f"detections-{experiment_id}-{dataset_id}.csv"
     alert_output = REPORTS / f"alerts-{experiment_id}-{dataset_id}.csv"
     result.to_csv(output, index=False)
@@ -305,8 +317,8 @@ def detect(experiment_id: int, dataset_id: str):
     })
     return {
         "experiment_id": experiment_id, "rows": len(result), "alerts": len(alerts),
-        "alert_preview": alerts.head(100).to_dict(orient="records"),
-        "predictions": result.head(100).to_dict(orient="records"),
+        "alert_preview": json.loads(alerts.head(100).to_json(orient="records")),
+        "predictions": json.loads(result.head(100).to_json(orient="records")),
         "export": f"/api/workspace/exports/{output.name}",
         "alerts_export": f"/api/workspace/exports/{alert_output.name}",
     }
