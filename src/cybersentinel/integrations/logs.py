@@ -64,7 +64,7 @@ def load_wazuh_alerts(path: str | Path) -> pd.DataFrame:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError("Wazuh export must be valid JSON.") from exc
-    alerts = payload.get("alerts", []) if isinstance(payload, dict) else payload
+    alerts = (payload.get("alerts") if "alerts" in payload else [payload]) if isinstance(payload, dict) else payload
     if not isinstance(alerts, list):
         raise ValueError("Wazuh JSON must be an array or an object with an alerts array.")
     rows = []
