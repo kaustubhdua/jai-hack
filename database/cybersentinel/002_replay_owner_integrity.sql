@@ -33,7 +33,7 @@ ALTER TABLE cybersentinel.replay_correlation_groups
   DROP CONSTRAINT replay_correlation_groups_run_id_fkey;
 
 INSERT INTO cybersentinel.schema_migrations (version, name)
-VALUES ('20261115011500', 'replay_child_records_require_matching_run_owner')
+VALUES ('20261115010413', 'replay_child_records_require_matching_run_owner')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
