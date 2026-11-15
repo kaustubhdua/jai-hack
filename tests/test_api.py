@@ -268,12 +268,12 @@ def test_serverless_replay_uses_neon_without_ephemeral_sqlite(monkeypatch):
     monkeypatch.setattr(index, "_pipeline", ReadyPipeline())
     monkeypatch.setattr(index, "_database_persistence_configured", lambda: True)
     monkeypatch.setattr(
-        index, "_neon_user_id",
+        index, "_database_user_id",
         lambda request: ("00000000-0000-4000-8000-000000000001", None),
     )
     monkeypatch.setattr(
         index, "_persist_replay_run",
-        lambda *args, **kwargs: {"stored": True, "backend": "neon"},
+        lambda *args, **kwargs: {"stored": True, "backend": "neon_postgres"},
     )
     monkeypatch.setattr(
         index, "_persist_replay_artifacts",
@@ -307,8 +307,8 @@ def test_serverless_replay_uses_neon_without_ephemeral_sqlite(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["neon_persistence"]["stored"] is True
-    assert payload["neon_persistence"]["artifacts"]["stored"] is True
+    assert payload["database_persistence"]["stored"] is True
+    assert payload["database_persistence"]["artifacts"]["stored"] is True
 
 
 def test_hosted_private_routes_fail_closed_without_neon(monkeypatch):
@@ -318,4 +318,4 @@ def test_hosted_private_routes_fail_closed_without_neon(monkeypatch):
     response = TestClient(index.app).get("/api/history")
 
     assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "NEON_NOT_CONFIGURED"
+    assert response.json()["detail"]["code"] == "DATABASE_NOT_CONFIGURED"
