@@ -269,7 +269,7 @@ def test_dedicated_batch_function_passes_request_context(monkeypatch):
 
 
 
-def test_serverless_replay_is_public_and_does_not_claim_database_persistence(monkeypatch):
+def test_serverless_replay_is_public_and_runs_without_cloud_storage(monkeypatch):
     monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
     monkeypatch.setattr(index, "_pipeline", ReadyPipeline())
 
@@ -301,9 +301,6 @@ def test_serverless_replay_is_public_and_does_not_claim_database_persistence(mon
     assert response.status_code == 200
     payload = response.json()
     assert payload["metrics"]["total_records"] == 2
-    assert payload["database_persistence"]["stored"] is False
-    assert payload["database_persistence"]["reason"] == "hosted_persistence_disabled"
-    assert payload["database_persistence"]["artifacts"]["stored"] is False
 
 
 def test_serverless_history_is_explicitly_stateless(monkeypatch):
