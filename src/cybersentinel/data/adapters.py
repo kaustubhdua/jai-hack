@@ -105,6 +105,18 @@ def normalize_dataset(
     normalized = frame.copy()
     rename: dict[str, str] = {}
     by_key = {_key(column): column for column in source_columns}
+    # pandas mangles repeated CIC flow headers such as
+    # "Fwd Header Length,Fwd Header Length" into
+    # "Fwd Header Length" and "Fwd Header Length.1". The production A1
+    # artifact preserves the second measurement as this stable feature name.
+    if dataset_type.casefold() in {"cic-ids2017", "cse-cic-ids2018"}:
+        for column in source_columns:
+            match = re.fullmatch(r"Fwd Header Length\.(\d+)", str(column), flags=re.IGNORECASE)
+            if match:
+                suffix = max(0, int(match.group(1)) - 1)
+                canonical_duplicate = f"Fwd Header Length_duplicated_{suffix}"
+                if canonical_duplicate not in normalized.columns:
+                    rename[column] = canonical_duplicate
     for canonical, aliases in ALIASES.items():
         if canonical == "label" and label_column:
             candidate = label_column

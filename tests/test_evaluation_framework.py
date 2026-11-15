@@ -76,3 +76,32 @@ def test_probability_calibration_uses_group_isolated_training_holdout():
     assert report["evaluation_samples"] == len(evaluation)
     assert "group-isolated" in report["calibration_provenance"]
     assert np.isfinite(report["calibrated"]["ece"])
+
+
+def test_high_level_anomaly_evaluation_unwraps_calibrated_agent_score():
+    from cybersentinel.evaluation.anomaly import evaluate_anomaly_detection
+
+    class FakeAnomalyAgent:
+        threshold = 0.0
+        score_scale = 1.0
+
+        def score_frame(self, frame):
+            raw_scores = np.array([0.5, 0.8, -0.5, -1.0])
+            anomaly_indices = 1.0 / (1.0 + np.exp(raw_scores))
+            return [
+                SimpleNamespace(
+                    anomaly_score=float(score),
+                    is_anomaly=bool(raw <= self.threshold),
+                )
+                for score, raw in zip(anomaly_indices, raw_scores)
+            ]
+
+    frame = pd.DataFrame({"label": ["BENIGN", "BENIGN", "DOS", "DDOS"]})
+    report = evaluate_anomaly_detection(frame, FakeAnomalyAgent())
+
+    # The public agent API returns sigmoid-calibrated anomaly indices; metric
+    # evaluation must invert the transform before applying Isolation Forest's
+    # lower-is-more-anomalous convention.
+    assert report["roc_auc"] == 1.0
+    assert report["operational_metrics"]["attack_recall"] == 1.0
+    assert report["operational_metrics"]["benign_fpr"] == 0.0
