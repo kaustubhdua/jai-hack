@@ -65,7 +65,7 @@ export default function App() {
   const [authSession, setAuthSession] = useState<any>(null);
   const [guestMode, setGuestMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(true);
-  const session = { user: { display_name: authSession?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.user?.email ?? null } };
+  const session = { user: { display_name: authSession?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.email ?? null } };
   const [health, setHealth] = useState<Health | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
 
