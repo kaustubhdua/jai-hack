@@ -21,7 +21,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "destination_port": ("destination port", "dst port", "dst_port", "dsport", "id.resp_p"),
     "source_ip": ("source ip", "src ip", "src_ip", "srcip", "id.orig_h"),
     "destination_ip": ("destination ip", "dst ip", "dst_ip", "dstip", "id.resp_h"),
-    "timestamp": ("timestamp", "stime", "start time", "flow start"),
+    "timestamp": ("timestamp", "stime", "start time", "flow start", "ts"),
     "label": ("label", " Label", "attack", "attack_cat", "category", "type"),
     "fwd_packets": ("total fwd packets", "tot fwd pkts", "spkts", "src_pkts"),
     "bwd_packets": ("total backward packets", "total bwd packets", "dpkts", "dst_pkts"),
