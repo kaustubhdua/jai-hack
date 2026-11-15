@@ -31,6 +31,9 @@ DATASET_PROFILES: dict[str, dict[str, Any]] = {
     "cic-ids2017": {"label_candidates": ["Label"], "families": ["BENIGN", "FTP-Patator", "SSH-Patator", "DoS", "DDoS", "PortScan", "Bot", "Infiltration", "Web Attack"]},
     "unsw-nb15": {"label_candidates": ["attack_cat", "label"], "families": ["Normal", "Fuzzers", "Analysis", "Backdoors", "DoS", "Exploits", "Generic", "Reconnaissance", "Shellcode", "Worms"]},
     "ton-iot": {"label_candidates": ["type", "label"], "families": ["normal", "backdoor", "ddos", "dos", "injection", "password", "ransomware", "scanning", "xss"]},
+    "bot-iot": {"label_candidates": ["category", "subcategory", "label"], "families": ["Normal", "DDoS", "DoS", "Reconnaissance", "Theft"]},
+    "cse-cic-ids2018": {"label_candidates": ["Label"], "families": ["Benign", "Bot", "Brute Force", "DoS", "DDoS", "Infiltration", "Web Attack"]},
+    "ciciot2023": {"label_candidates": ["label", "attack"], "families": ["Benign", "DDoS", "DoS", "Mirai", "Recon", "Spoofing", "Web"]},
     "generic": {"label_candidates": ["label", "class", "attack", "category", "target"], "families": []},
 }
 
@@ -131,6 +134,8 @@ def load_dataset(
             selected_type = "cic-ids2017"
         elif {"ts", "srcip", "dstip"}.issubset(names):
             selected_type = "ton-iot"
+        elif {"sbytes", "dbytes", "proto"}.issubset(names):
+            selected_type = "bot-iot"
         else:
             selected_type = "generic"
     if selected_type not in DATASET_PROFILES:
