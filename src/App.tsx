@@ -246,7 +246,7 @@ export default function App() {
         </div>
         <div className="profile-row">
           <div className="profile-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
-          <div className="profile-meta"><b>{session.user.display_name}</b><small>Account-free workspace · local data</small></div>}
+          <div className="profile-meta"><b>{session.user.display_name}</b><small>Account-free workspace · local data</small></div>
         </div>
       </div>
     </aside>
