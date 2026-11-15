@@ -223,13 +223,18 @@ def detect(experiment_id: int, dataset_id: str):
     else:
         predictions = estimator.predict(X)
         result = pd.DataFrame({"prediction": predictions.astype(str)})
-    alerts = result[result["prediction"].astype(str).str.upper().isin(["ANOMALY", "ATTACK", "MALICIOUS", "DOS", "DDOS", "BRUTE_FORCE", "PORT_SCAN"])].copy()
+    benign_labels = {"BENIGN", "NORMAL", "LEGITIMATE", "0", "FALSE", "ALLOW"}
+    alerts = result[~result["prediction"].astype(str).str.upper().isin(benign_labels)].copy()
     output = REPORTS / f"detections-{experiment_id}-{dataset_id}.csv"
+    alert_output = REPORTS / f"alerts-{experiment_id}-{dataset_id}.csv"
     result.to_csv(output, index=False)
+    alerts.to_csv(alert_output, index=False)
     return {
         "experiment_id": experiment_id, "rows": len(result), "alerts": len(alerts),
+        "alert_preview": alerts.head(100).to_dict(orient="records"),
         "predictions": result.head(100).to_dict(orient="records"),
         "export": f"/api/workspace/exports/{output.name}",
+        "alerts_export": f"/api/workspace/exports/{alert_output.name}",
     }
 
 
