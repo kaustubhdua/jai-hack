@@ -33,7 +33,7 @@ Requirements: Python 3.10+, Node.js 20+, and npm.
 git clone https://github.com/kaustubhdua/jai-hack.git
 cd jai-hack
 python -m venv .venv
-# Windows: .venv\\Scripts\\activate
+# Windows: .venv\Scripts\activate
 source .venv/bin/activate
 pip install -e ".[dev,ml]"
 npm install
