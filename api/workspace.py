@@ -6,6 +6,7 @@ serverless filesystem is ephemeral; persistent work must run on a local host.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -23,7 +24,7 @@ from cybersentinel.integrations.logs import load_zeek_conn, load_suricata_eve, l
 
 router = APIRouter(prefix="/api/workspace", tags=["Analyst Workspace"])
 ROOT = Path(__file__).resolve().parent.parent
-WORKSPACE = ROOT / "data" / "workspace"
+WORKSPACE = Path("/tmp/cybersentinel-workspace") if os.environ.get("VERCEL") == "1" else ROOT / "data" / "workspace"
 UPLOADS = WORKSPACE / "uploads"
 MODELS = WORKSPACE / "models"
 REPORTS = WORKSPACE / "reports"
@@ -32,6 +33,11 @@ for directory in (UPLOADS, MODELS, REPORTS):
 STORE = ExperimentStore(WORKSPACE / "experiments.sqlite3")
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 ALLOWED_SUFFIXES = {".csv", ".parquet", ".pq", ".feather", ".arrow"}
+
+
+def _require_local_workspace() -> None:
+    if os.environ.get("VERCEL") == "1":
+        raise HTTPException(status_code=403, detail="Uploads and training are disabled on the public serverless demo. Run the API locally for a private persistent workspace.")
 
 
 def _dataset_path(dataset_id: str) -> Path:
@@ -92,6 +98,7 @@ class EvaluateRequest(BaseModel):
 
 @router.post("/datasets")
 async def upload_dataset(file: UploadFile = File(...), dataset_type: str = "auto"):
+    _require_local_workspace()
     suffix = Path(file.filename or "").suffix.casefold()
     if suffix not in ALLOWED_SUFFIXES:
         raise HTTPException(status_code=415, detail="Upload CSV, Parquet, or Feather/Arrow files only.")
@@ -147,6 +154,7 @@ def dataset_profile(dataset_id: str):
 
 @router.post("/train")
 def train(request: TrainRequest):
+    _require_local_workspace()
     path = _dataset_path(request.dataset_id)
     bundle = load_dataset(path)
     config = ExperimentConfig(
@@ -192,6 +200,7 @@ def _experiment_model(experiment_id: int) -> tuple[Path, dict[str, Any]]:
 
 @router.post("/evaluate")
 def evaluate(request: EvaluateRequest):
+    _require_local_workspace()
     model_path, experiment = _experiment_model(request.experiment_id)
     target = load_dataset(_dataset_path(request.dataset_id)).frame
     try:
@@ -206,6 +215,7 @@ def evaluate(request: EvaluateRequest):
 
 @router.post("/detect/{experiment_id}")
 def detect(experiment_id: int, dataset_id: str):
+    _require_local_workspace()
     import joblib
     model_path, _ = _experiment_model(experiment_id)
     bundle = joblib.load(model_path)
@@ -241,6 +251,7 @@ def detect(experiment_id: int, dataset_id: str):
 @router.post("/integrations/{source}")
 async def ingest_open_source_telemetry(source: str, file: UploadFile = File(...)):
     """Convert supported Zeek, Suricata, Wazuh logs into a local dataset."""
+    _require_local_workspace()
     suffix = Path(file.filename or "").suffix.casefold()
     temp_id = uuid4().hex
     temp_path = UPLOADS / f"{temp_id}{suffix}"
