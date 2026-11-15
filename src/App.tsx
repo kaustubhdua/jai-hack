@@ -63,6 +63,11 @@ const formatNumber = (n: number) => new Intl.NumberFormat("en-IN").format(n);
 
 export default function App() {
   const session = { user: { display_name: "Local analyst" } };
+
+  useEffect(() => {
+    // Clear any legacy account token left by older versions of the app.
+    localStorage.removeItem("cybersentinel_access_token");
+  }, []);
   const [overview, setOverview] = useState<any>(null);
   const [overviewState, setOverviewState] = useState<"idle" | "loading" | "ready" | "empty" | "error">("loading");
   const [overviewMessage, setOverviewMessage] = useState("");
