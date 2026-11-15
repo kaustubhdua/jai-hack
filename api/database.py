@@ -62,10 +62,19 @@ def register_user(email,password):
     user={"id":str(row["id"]),"email":row["email"],"created_at":row["created_at"].isoformat()}
     return {"user":user,"access_token":_sign_token(user),"token_type":"bearer","expires_in":TOKEN_TTL_SECONDS}
 def login_user(email,password):
-    with connect() as conn:row=conn.execute("SELECT id,email,password_hash,created_at FROM users WHERE email=%s AND is_active=true",(email.strip().lower(),)).fetchone()
-    if not row or not _password_matches(password,row["password_hash"]):raise AuthError("Email or password is incorrect.")
-    user={"id":str(row["id"]),"email":row["email"],"created_at":row["created_at"].isoformat()}
-    return {"user":user,"access_token":_sign_token(user),"token_type":"bearer","expires_in":TOKEN_TTL_SECONDS}
+    email=email.strip().lower()
+    email_hash=hashlib.sha256(email.encode('utf-8')).hexdigest()
+    with connect() as conn:
+        conn.execute("DELETE FROM auth_rate_limits WHERE attempted_at < now() - interval '1 day'")
+        attempts=conn.execute("SELECT count(*) AS attempts FROM auth_rate_limits WHERE email_hash=%s AND attempted_at > now() - interval '15 minutes'",(email_hash,)).fetchone()['attempts']
+        if attempts >= 10: raise AuthError('Too many sign-in attempts. Wait 15 minutes and try again.')
+        conn.execute('INSERT INTO auth_rate_limits(email_hash) VALUES(%s)',(email_hash,))
+        row=conn.execute('SELECT id,email,password_hash,created_at FROM users WHERE email=%s AND is_active=true',(email,)).fetchone()
+        if not row or not _password_matches(password,row['password_hash']): raise AuthError('Email or password is incorrect.')
+        conn.execute('DELETE FROM auth_rate_limits WHERE email_hash=%s',(email_hash,))
+    user={'id':str(row['id']),'email':row['email'],'created_at':row['created_at'].isoformat()}
+    return {'user':user,'access_token':_sign_token(user),'token_type':'bearer','expires_in':TOKEN_TTL_SECONDS}
+
 def current_user_from_request(request):
     auth=request.headers.get("authorization","")
     if not auth.lower().startswith("bearer "):raise AuthError("Sign in to continue.")
