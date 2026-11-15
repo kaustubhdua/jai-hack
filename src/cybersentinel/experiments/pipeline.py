@@ -8,12 +8,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import platform
 from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
@@ -207,13 +209,24 @@ def train_experiment(
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     model_path = output / "model.joblib"
-    joblib.dump({"estimator": estimator, "config": asdict(config), "features": columns,
+    training_stats = {
+        column: {
+            "mean": float(X[column].mean()),
+            "std": float(X[column].std(ddof=0)) if float(X[column].std(ddof=0)) > 0 else 1.0,
+            "median": float(X[column].median()),
+            "q25": float(X[column].quantile(0.25)),
+            "q75": float(X[column].quantile(0.75)),
+        } for column in columns
+    }
+    joblib.dump({"artifact_version": 1, "estimator": estimator, "config": asdict(config), "features": columns,
+                 "training_stats": training_stats,
                  "classes": sorted(labels.unique().tolist()) if labels is not None else None}, model_path)
     manifest = {
-        "model": config.model, "config": asdict(config), "features": columns,
+        "artifact_version": 1, "model": config.model, "config": asdict(config), "features": columns,
         "classes": sorted(labels.unique().tolist()) if labels is not None else None,
         "training_rows": int(len(training)), "dataset": dataset_manifest or {},
         "model_path": str(model_path), "model_sha256": _sha256(model_path),
+        "runtime": {"python": platform.python_version(), "pandas": pd.__version__, "scikit_learn": sklearn.__version__},
         "scoring_mode": "classification" if labels is not None else "unsupervised_anomaly",
     }
     (output / "experiment.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
@@ -227,11 +240,29 @@ def evaluate_cross_dataset(
     label_mapping: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     bundle = joblib.load(model_path)
+    if bundle.get("artifact_version") != 1:
+        raise ValueError("Unsupported model artifact version.")
     estimator, features = bundle["estimator"], bundle["features"]
     missing = sorted(set(features) - set(target.columns))
     if missing:
         raise ValueError(f"Target dataset is missing {len(missing)} trained feature(s): {missing[:30]}")
     X = target[features].apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    drift = []
+    for column in features:
+        train_stats = bundle.get("training_stats", {}).get(column, {})
+        target_mean = float(X[column].mean()) if X[column].notna().any() else None
+        if target_mean is not None:
+            scale = float(train_stats.get("std") or 1.0) or 1.0
+            smd = abs(target_mean - float(train_stats.get("mean", 0.0))) / scale
+            drift.append({"feature": column, "standardized_mean_difference": round(smd, 6)})
+    drift.sort(key=lambda item: item["standardized_mean_difference"], reverse=True)
+    drift_index = float(np.mean([item["standardized_mean_difference"] for item in drift])) if drift else 0.0
+    drift_summary = {
+        "index_mean_absolute_standardized_difference": round(drift_index, 6),
+        "high_drift_features": [item for item in drift if item["standardized_mean_difference"] >= 0.5][:20],
+        "top_features": drift[:20],
+        "interpretation": "Descriptive feature-distribution shift only; not a causal explanation or performance metric.",
+    }
     if bundle["config"]["model"] == "isolation_forest":
         scores = estimator.decision_function(X)
         predictions = estimator.predict(X)
@@ -240,6 +271,8 @@ def evaluate_cross_dataset(
             "anomaly_count": int((predictions == -1).sum()),
             "anomaly_fraction": float((predictions == -1).mean()),
             "mean_anomaly_score": float(np.mean(-scores)),
+            "feature_drift": drift_summary,
+            "domain_shift_warning": drift_index >= 0.25,
             "trained_features": features, "missing_features": [],
         }
     if label_column not in target.columns:
@@ -259,5 +292,6 @@ def evaluate_cross_dataset(
         ).tolist(),
         "classes": list(bundle["classes"]) + unknown, "unknown_target_labels": unknown,
         "trained_features": features, "missing_features": [],
-        "domain_shift_warning": bool(unknown or len(set(y_true)) != len(known)),
+        "feature_drift": drift_summary,
+        "domain_shift_warning": bool(unknown or len(set(y_true)) != len(known) or drift_index >= 0.25),
     }
