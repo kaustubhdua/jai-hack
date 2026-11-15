@@ -1,7 +1,8 @@
 # Deployment and Runtime Boundaries
 
 ## Supported execution mode
-CyberSentinel's authoritative workflow is local/offline replay. The FastAPI backend loads local model artifacts, reads the locally installed unlabelled hidden replay input, generates the three submission CSVs, and writes run history to local SQLite.
+
+CyberSentinel's authoritative workflow is local/offline replay. The FastAPI backend loads the checked-in model artifacts, reads an installed unlabelled replay input, generates the three submission CSVs, and writes local convenience history to SQLite.
 
 Install and run the local stack from the repository root:
 
@@ -17,60 +18,61 @@ In a second terminal:
 npm run dev
 ```
 
-Vite proxies `/api` requests to `http://127.0.0.1:8000`. Install authorised inputs and trained model artifacts in the ignored local paths documented in `docs/evaluation.md`. Do not commit organiser data, model binaries, generated submissions, `.env` files, or local databases.
+Vite proxies /api requests to http://127.0.0.1:8000. Install authorized inputs and trained model artifacts in the ignored local paths documented in docs/evaluation.md. Do not commit organizer data, generated submissions, .env files, or local databases.
 
 ## Vercel deployment
 
-The Vercel project remains on the **Vite** framework preset so the React frontend is built and served as static assets. `vercel.json` rewrites `/api/*` requests to the `api/index.py` function at `/api`; the small ASGI middleware in that file restores the original request path before FastAPI route matching. This is necessary because Vercel file-based Python routing otherwise exposes `api/health.py`, `api/models/status.py`, and other files as separate functions while the majority of routes live on the central FastAPI app. Keep Vercel’s automatic install/build settings so npm and Python dependencies are both installed correctly. Do not switch this project to the FastAPI framework preset: it currently returns the API health JSON at `/` instead of the Vite frontend and does not collect the generated `dist/` files into the CDN.
+The Vercel project uses the Vite framework preset so the React frontend is served as static assets. vercel.json rewrites /api/* requests to api/index.py; the ASGI middleware restores the original request path before FastAPI route matching. Keep automatic install/build settings so npm and Python dependencies are installed correctly. Do not switch to the FastAPI framework preset: that can replace the static React entry point.
 
-The repository is connected to a Vercel project and the frontend/API bundle can build. A preview deployment for `feat/cybersentinel-release-hardening` reached Vercel `READY` on 2026-10-31. The current production deployment is also reported as `READY`; this confirms deployment packaging, not end-to-end model readiness or official replay acceptance.
+The Vercel Hobby build quota has previously blocked deployments. Do not repeatedly retry or upgrade the plan to bypass a quota. Deploy the latest tested branch after the quota resets, wait for READY, then verify the exact deployment URL and production alias independently.
 
-### Current deployment handoff (2026-11-15)
+## Backend: Neon Postgres, no Supabase
 
-The latest `main` source includes the isolated `common 1` Supabase schema integration. GitHub's Python tests, static-security checks, and frontend build pass on the latest main commit. Vercel's project environment variables now point to `common 1`, but Vercel applies environment changes to a deployment only when that deployment is built.
+Supabase has been removed from the CyberSentinel runtime. The frontend has no Supabase SDK, the API has no Supabase Auth/PostgREST calls, and Vercel must not contain Supabase runtime configuration.
 
-The production alias still points to the older deployment built from commit `d3b061d`, before the common-schema integration. The old dedicated `jai-hack` Supabase project is now paused, so the old production deployment must be treated as **temporarily unavailable for authenticated backend operations** until a new production build is ready and the aliases are moved. Do not describe the current production alias as running the latest code.
+The hosted backend uses a dedicated Neon Postgres Free project. It is separate from all other applications and uses the cybersentinel schema. Vercel's server-only sensitive variables are:
 
-Vercel rejected new deployment creation with `402 payment_required` / `api-deployments-free-per-day` and a 24-hour retry window. Do not repeatedly retry or upgrade the plan just to bypass the limit. After the quota window resets, deploy the latest `main` commit, wait for `READY`, then verify `/api/health`, `/api/models/status`, Supabase sign-up/sign-in, one authenticated replay write/read, and two-user RLS isolation before treating production as restored. Older preview deployments from intermediate commits are not suitable substitutes for the latest main build.
+- DATABASE_URL: pooled Neon Postgres connection string using the restricted cybersentinel_app role.
+- AUTH_SECRET: random HMAC signing key, at least 32 characters.
 
-Important limitations:
+Both variables are set for Production, Preview, and Development. Neither is exposed to the browser. Do not add VITE_DATABASE_URL, VITE_AUTH_SECRET, or any provider key to the frontend.
 
-- `data/processed/*` and `models/*` are intentionally ignored by Git. A standard Git-triggered Vercel deployment therefore does not contain the organiser evaluation dataset or fitted model artifacts.
-- Without both model files, `/api/health` reports `model_ready: false` and inference endpoints return `503 MODEL_NOT_READY`. The UI can load while the model-backed product workflow remains unavailable.
-- `POST /api/replay/run-official` remains disabled in the serverless runtime until verified model/input artifacts and durable submission-file storage are provisioned. Run the official challenge workflow with the documented offline runner; hosted audit history is still persisted to Supabase.
-- `POST /api/replay/run-official` is a synchronous request. The current `vercel.json` config sets Python functions under `api/*.py` and `api/**/*.py` to `maxDuration: 300` seconds. This is a platform execution ceiling, not proof that a full hidden replay fits within it; run the official replay locally unless a separately tested background-job/artifact architecture is implemented.
-- Local/offline runs also maintain a local SQLite convenience history (`data/cybersentinel_history.db`). On Vercel, `/api/replay/simulate` does not write SQLite: it stores run summaries, decisions, policies, and correlation groups in Supabase Postgres using the caller's JWT and RLS. Raw flow records and model artifacts are not stored in Postgres.
-- Preview deployments should remain protected by Vercel SSO; use an authorised session for browser QA. Production custom domains are public.
+The API provides first-party account endpoints:
 
-Do not describe the Vercel deployment as a verified production SOC service until model/data provisioning, durable run storage, full replay execution, API routes, and browser workflows have been tested end-to-end in that environment.
+- POST /api/auth/signup
+- POST /api/auth/login
+- GET /api/auth/me
+
+Passwords are PBKDF2-HMAC-SHA256 hashed; bearer tokens are HMAC-SHA256 signed and expire after 12 hours. The API derives user identity from a verified token and filters audit reads by that user. Replay child events are constrained to a replay run owned by the same user. The browser clears its token on sign-out. Email verification and password recovery are not implemented; do not imply otherwise.
+
+The Neon project uses a 0.25 CU compute with scale-to-zero. Expect cold-start latency after inactivity. Monitor the Free plan's storage, compute-active time, and network-transfer allowances. Do not store raw flow records or model binaries in Postgres.
+
+See docs/neon-backend.md for schema, role, authentication, and local setup details.
+
+## Artifact and replay boundaries
+
+- data/processed/* and most local training inputs are intentionally ignored by Git. A normal Git deployment therefore does not automatically contain organizer hidden data.
+- Both model artifacts are checked into the repository and have a runtime smoke test, but that alone does not prove the live deployment loaded them.
+- POST /api/replay/run-official remains disabled in the serverless runtime until verified model/input artifacts and durable submission-file storage are provisioned. Run official challenge replay with the documented offline runner unless a separately tested background-job/artifact architecture is implemented.
+- Vercel's filesystem is ephemeral. Hosted replay summaries and derived audit events are durable in Neon; generated submission files and hidden replay input are not.
+- The configured Python function maximum duration is 300 seconds. This is a platform ceiling, not proof that a full replay fits within it.
+- A Vercel READY deployment proves build/deployment state, not end-to-end model readiness, account flow, tenant isolation, full replay success, or official organizer acceptance.
 
 ## Public guest demonstration
 
-The React application supports a public guest path when Supabase Auth is configured. On the sign-in screen, visitors can choose **Explore public demo without signing in**. Guest mode is intentionally read-only and exposes only:
+The React application opens in a public read-only guest mode. Visitors can explore the overview and five-agent architecture and inspect a CSV locally in their browser; the selected file is not uploaded by that inspection. Guest mode does not access private history or privileged analysis routes.
 
-- The overview and illustrative five-agent architecture.
-- The browser-local CSV schema/label inspection tool. It does not upload the selected file or run inference.
-- The public liveness/model-readiness status displayed by the overview.
-
-Guest mode does not load /api/history or /api/overview, and it hides the Flow Inspector, replay, evidence-fusion, correlation, adaptive-defense, audit/history, and system-diagnostics screens. Authenticated analyst access remains available through Supabase Auth.
-
-This is a presentation/demo boundary, not a replacement for server authorization. Sensitive API routes must continue to enforce Supabase bearer-token authentication and user ownership independently of frontend navigation. The public demo must never be used to expose private replay rows, generated submissions, or administrative operations.
-
-## Supabase authentication and data boundary
-
-The React app creates a Supabase client from VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, restores the browser session, and subscribes to auth-state changes. The analyst sign-in/sign-up screen is application-level authentication; Vercel deployment protection is a separate setting. The API client forwards the Supabase access token as a bearer token when a session exists.
-
-The API explicitly requires an authenticated user for private history and overview data, inference, replay, evaluation snapshots, submission downloads, system diagnostics, policy, and correlation operations. Keep those checks in the backend even when the corresponding controls are hidden from guest users. The anonymous role must not gain access to private history tables; keep RLS enabled and verify ownership isolation with separate test users before production use.
-
-The shared Supabase project `common 1` is the active Auth and Postgres backend. CyberSentinel stores hosted replay summaries and derived audit records only in its isolated `cybersentinel` schema, selected explicitly with PostgREST profile headers. The existing `bharatsim`, `genomeguard`, and `public` schemas are not modified. The old dedicated `jai-hack` Supabase project is paused and retained as a rollback source; it is not the configured runtime backend.
-
-Supabase is the durable store for hosted replay summaries and derived audit records, but it is not a substitute for durable job/artifact infrastructure. Vercel's filesystem remains ephemeral; official hidden replay input, trained model artifacts, and generated submission files are not provisioned by a standard Git deployment. Do not claim hosted official replay or full model-backed readiness until those artifact paths are separately provisioned and tested.
+Signing in opens the private analyst workspace. The frontend navigation is only a presentation boundary: every private API route must continue to enforce token authentication and user ownership on the server.
 
 ## Readiness checks
 
-- `GET /api/health`: API liveness and model availability.
-- `GET /api/models/status`: model artifact and agent metadata.
-- `GET /api/system/diagnostics`: local model, dataset, submission, history DB and simulated-firewall status.
-- `GET /api/replay/validate`: validates generated submission files against the original installed unlabelled hidden replay input.
+- GET /api/health: API liveness and model availability.
+- GET /api/models/status: model artifact and agent metadata.
+- GET /api/system/diagnostics: local model, dataset, submission, database and simulated-firewall status.
+- GET /api/auth/me: current account/session validation.
+- GET /api/history: private replay and evaluation history.
+- GET /api/replay/validate: validates generated submission files against the original installed unlabelled hidden replay input.
 
-Use `docs/evaluation.md` for training, evaluation, replay and local submission reproduction. Use `docs/release-hardening.md` for causal replay and CSV acceptance invariants.
+Before declaring production ready, verify signup, login, invalid credentials, expired token handling, authenticated analysis, replay persistence, history reads, and cross-user isolation against the deployed API and Neon database. Then run a real browser walkthrough of the production alias.
+
+Use docs/evaluation.md for training, evaluation, replay and local submission reproduction. Use docs/release-hardening.md for causal replay and CSV acceptance invariants.

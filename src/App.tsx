@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { ParticleBackdrop } from "./components/ParticleBackdrop";
 import "./components/DashboardStates.css";
-import { supabase } from "./lib/supabase";
 import { apiFetch } from "./lib/api";
 const Agent2Console = lazy(() => import("./FlowInspector").then(module => ({ default: module.Agent2Console })));
 const FlowInspector = lazy(() => import("./FlowInspector").then(module => ({ default: module.FlowInspector })));
@@ -64,37 +63,25 @@ const formatNumber = (n: number) => new Intl.NumberFormat("en-IN").format(n);
 
 export default function App() {
   const [authSession, setAuthSession] = useState<any>(null);
-  const [guestMode, setGuestMode] = useState(false);
-  const [authLoading, setAuthLoading] = useState(Boolean(supabase));
-  const session = { user: { display_name: authSession?.user?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.user?.email ?? null } };
+  const [guestMode, setGuestMode] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
+  const session = { user: { display_name: authSession?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.email ?? null } };
   const [health, setHealth] = useState<Health | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
 
   useEffect(() => {
-    if (!supabase) { setAuthLoading(false); return; }
     let active = true;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (active) {
-        setAuthSession(data.session);
-        // Anonymous visitors enter the public, read-only demo by default.
-        setGuestMode(!data.session);
-        setAuthLoading(false);
-      }
+    const token = localStorage.getItem("cybersentinel_access_token");
+    if (!token) { setAuthLoading(false); return; }
+    void apiFetch("/api/auth/me").then(async response => {
+      if (!response.ok) throw new Error("Session expired");
+      const payload = await response.json();
+      if (active) { setAuthSession(payload.user); setGuestMode(false); }
     }).catch(() => {
-      if (active) {
-        // A failed local session lookup must not strand public visitors on a login screen.
-        setAuthSession(null);
-        setGuestMode(true);
-        setAuthLoading(false);
-      }
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setAuthSession(nextSession);
-      // Signing out returns to the public demo instead of a login wall.
-      setGuestMode(!nextSession);
-      setAuthLoading(false);
-    });
-    return () => { active = false; subscription.unsubscribe(); };
+      localStorage.removeItem("cybersentinel_access_token");
+      if (active) { setAuthSession(null); setGuestMode(true); }
+    }).finally(() => { if (active) setAuthLoading(false); });
+    return () => { active = false; };
   }, []);
   const [overview, setOverview] = useState<any>(null);
   const [overviewState, setOverviewState] = useState<"idle" | "loading" | "ready" | "empty" | "error">("loading");
@@ -120,14 +107,14 @@ export default function App() {
       setHistoryMessage(typeof data.message === "string" ? data.message : "");
     } catch {
       setHistory([]);
-      setHistoryMessage("Private replay history is unavailable. Check the API connection and your Supabase session.");
+      setHistoryMessage("Private replay history is unavailable. Check the API connection and your account session.");
     } finally {
       setHistoryLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (supabase && !authSession) {
+    if (!authSession) {
       setHistory([]);
       setHistoryMessage("");
       setHistoryLoading(false);
@@ -177,7 +164,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     void checkHealth();
-    if (supabase && !authSession) {
+    if (!authSession) {
       setOverview(null);
       setOverviewState("idle");
       setOverviewMessage("");
@@ -245,8 +232,8 @@ export default function App() {
   const totalLabels = dataset ? Object.values(dataset.labels).reduce((a, b) => a + b, 0) : 0;
   const labelCoverage = totalLabels ? Math.round(knownLabels.reduce((n, l) => n + dataset!.labels[l], 0) / totalLabels * 100) : 0;
 
-  if (supabase && authLoading) return <div className="app-shell"><main className="main-content"><div className="page-wrap"><div className="workspace-loading" role="status" aria-live="polite"><span className="workspace-loading-spinner" aria-hidden="true" />Checking secure Supabase session…</div></div></main></div>;
-  if (supabase && !authSession && !guestMode) return <AuthScreen onGuest={() => setGuestMode(true)} />;
+  if (authLoading) return <div className="app-shell"><main className="main-content"><div className="page-wrap"><div className="workspace-loading" role="status" aria-live="polite"><span className="workspace-loading-spinner" aria-hidden="true" />Checking secure workspace session…</div></div></main></div>;
+  if (!authSession && !guestMode) return <AuthScreen onGuest={() => setGuestMode(true)} onAuthenticated={user => { setAuthSession(user); setGuestMode(false); }} />;
 
   return <div className="app-shell">
     <ParticleBackdrop />
@@ -289,8 +276,8 @@ export default function App() {
         </div>
         <div className="profile-row">
           <div className="profile-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
-          <div className="profile-meta"><b>{session.user.display_name}</b><small>{authSession ? "Authenticated Supabase user" : guestMode ? "Guest · read-only access" : "Local analyst session"}</small></div>
-          {authSession && <button className="secondary-btn" onClick={() => { void supabase?.auth.signOut(); }} style={{ padding: "5px 8px", fontSize: 10 }}>Sign out</button>}
+          <div className="profile-meta"><b>{session.user.display_name}</b><small>{authSession ? "Authenticated Neon Postgres user" : guestMode ? "Guest · read-only access" : "Local analyst session"}</small></div>
+          {authSession && <button className="secondary-btn" onClick={() => { localStorage.removeItem("cybersentinel_access_token"); setAuthSession(null); setGuestMode(true); }} style={{ padding: "5px 8px", fontSize: 10 }}>Sign out</button>}
         </div>
       </div>
     </aside>
@@ -301,7 +288,7 @@ export default function App() {
         <div className="crumb"><span>Workspace</span><span>/</span><b>{activeNav}</b></div>
         <div className="top-actions">
           <div className="env-pill"><span className="pulse-dot" /> OFFLINE REPLAY MODE</div>
-          {guestMode && supabase && <button className="secondary-btn" onClick={() => setGuestMode(false)}>Sign in</button>}
+          {guestMode && <button className="secondary-btn" onClick={() => setGuestMode(false)}>Sign in</button>}
           <button className="icon-btn" title="Refresh API, replay history and overview" onClick={() => { void checkHealth(); if (!guestMode) { void loadOverview(); void loadHistory(); } }}><RefreshCw size={16} /></button>
           <div className="top-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
         </div>
@@ -429,7 +416,7 @@ export default function App() {
             <section className="panel history-panel">
               <div className="panel-head history-head">
                 <div>
-                  <div className="panel-kicker">SUPABASE REPLAY AUDIT TRAIL</div>
+                  <div className="panel-kicker">NEON POSTGRES REPLAY AUDIT TRAIL</div>
                   <h3>Recent Cloud Replay Runs</h3>
                   <p>Only your authenticated replay summaries appear here. Unlabelled replay data does not provide accuracy or false-block metrics.</p>
                 </div>
@@ -507,7 +494,7 @@ export default function App() {
   </div>;
 }
 
-function AuthScreen({ onGuest }: { onGuest: () => void }) {
+function AuthScreen({ onGuest, onAuthenticated }: { onGuest: () => void; onAuthenticated: (user: any) => void }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -517,32 +504,29 @@ function AuthScreen({ onGuest }: { onGuest: () => void }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      if (mode === "signin") {
-        const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (authError) throw authError;
-      } else {
-        const { data, error: authError } = await supabase.auth.signUp({ email: email.trim(), password });
-        if (authError) throw authError;
-        if (!data.session) setMessage("Account created. Check your email to confirm the address, then sign in.");
-      }
+      const response = await fetch(mode === "signin" ? "/api/auth/login" : "/api/auth/signup", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail?.message || "Authentication failed.");
+      localStorage.setItem("cybersentinel_access_token", payload.access_token);
+      onAuthenticated(payload.user);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Authentication failed.");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   return <div className="app-shell" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
     <section className="panel dataset-panel" style={{ width: "min(460px, 100%)", padding: 28 }}>
-      <div className="panel-kicker">CYBERSENTINEL · SECURE WORKSPACE</div>
+      <div className="panel-kicker">CYBERSENTINEL · PRIVATE WORKSPACE</div>
       <h2 style={{ margin: "10px 0" }}>{mode === "signin" ? "Sign in to your workspace" : "Create your analyst account"}</h2>
-      <p style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.6 }}>Sign in with Supabase Auth to access your private replay history and inference audit trail. Network-flow files remain local and are not uploaded.</p>
+      <p style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.6 }}>Accounts are secured by the CyberSentinel API. Your private replay history and audit records are stored in an isolated Neon Postgres database. Network-flow files remain local unless you explicitly submit them for analysis.</p>
       <form onSubmit={submit} style={{ display: "grid", gap: 12, marginTop: 20 }}>
         <label style={{ display: "grid", gap: 6, fontSize: 11 }}>Email<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} style={{ padding: 12, borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--text)" }} /></label>
-        <label style={{ display: "grid", gap: 6, fontSize: 11 }}>Password<input type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} minLength={8} required value={password} onChange={e => setPassword(e.target.value)} style={{ padding: 12, borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--text)" }} /></label>
+        <label style={{ display: "grid", gap: 6, fontSize: 11 }}>Password<input type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} minLength={8} maxLength={128} required value={password} onChange={e => setPassword(e.target.value)} style={{ padding: 12, borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--text)" }} /></label>
         {error && <div className="parse-warning" role="alert">{error}</div>}
         {message && <div className="empty-inline" role="status">{message}</div>}
         <button className="primary-btn" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}</button>

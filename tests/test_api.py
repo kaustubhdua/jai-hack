@@ -40,9 +40,9 @@ class ReadyPipeline:
         return [self.analyze(flow) for flow in flows]
 
 
-def test_system_diagnostics_requires_auth_when_supabase_is_configured(monkeypatch):
-    monkeypatch.setattr(index, "_supabase_public_key", lambda: "test-anon-key")
-    monkeypatch.setattr(index, "_supabase_project_host", lambda: "test-project.supabase.co")
+def test_system_diagnostics_requires_auth_when_neon_is_configured(monkeypatch):
+    monkeypatch.setattr(index, "database_configured", lambda: True)
+    monkeypatch.setattr(index, "_database_user_id", lambda request: (None, "not_authenticated"))
     response = TestClient(index.app).get("/api/system/diagnostics")
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "AUTH_REQUIRED"
@@ -263,17 +263,17 @@ def test_dedicated_batch_function_passes_request_context(monkeypatch):
 
 
 
-def test_serverless_replay_uses_supabase_without_ephemeral_sqlite(monkeypatch):
+def test_serverless_replay_uses_neon_without_ephemeral_sqlite(monkeypatch):
     monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
     monkeypatch.setattr(index, "_pipeline", ReadyPipeline())
-    monkeypatch.setattr(index, "_supabase_persistence_configured", lambda: True)
+    monkeypatch.setattr(index, "_database_persistence_configured", lambda: True)
     monkeypatch.setattr(
-        index, "_supabase_user_id",
+        index, "_database_user_id",
         lambda request: ("00000000-0000-4000-8000-000000000001", None),
     )
     monkeypatch.setattr(
         index, "_persist_replay_run",
-        lambda *args, **kwargs: {"stored": True, "backend": "supabase"},
+        lambda *args, **kwargs: {"stored": True, "backend": "neon_postgres"},
     )
     monkeypatch.setattr(
         index, "_persist_replay_artifacts",
@@ -307,15 +307,15 @@ def test_serverless_replay_uses_supabase_without_ephemeral_sqlite(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["supabase_persistence"]["stored"] is True
-    assert payload["supabase_persistence"]["artifacts"]["stored"] is True
+    assert payload["database_persistence"]["stored"] is True
+    assert payload["database_persistence"]["artifacts"]["stored"] is True
 
 
-def test_hosted_private_routes_fail_closed_without_supabase(monkeypatch):
+def test_hosted_private_routes_fail_closed_without_neon(monkeypatch):
     monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
-    monkeypatch.setattr(index, "_supabase_persistence_configured", lambda: False)
+    monkeypatch.setattr(index, "_database_persistence_configured", lambda: False)
 
     response = TestClient(index.app).get("/api/history")
 
     assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "SUPABASE_NOT_CONFIGURED"
+    assert response.json()["detail"]["code"] == "DATABASE_NOT_CONFIGURED"
