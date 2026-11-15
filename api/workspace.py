@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from cybersentinel.data.adapters import load_dataset
 from cybersentinel.experiments.pipeline import ExperimentConfig, train_experiment, evaluate_cross_dataset
 from cybersentinel.experiments.store import ExperimentStore
+from cybersentinel.integrations.logs import load_zeek_conn, load_suricata_eve, load_wazuh_alerts, load_sigma_rule
 
 router = APIRouter(prefix="/api/workspace", tags=["Analyst Workspace"])
 ROOT = Path(__file__).resolve().parent.parent
@@ -230,6 +231,57 @@ def detect(experiment_id: int, dataset_id: str):
         "predictions": result.head(100).to_dict(orient="records"),
         "export": f"/api/workspace/exports/{output.name}",
     }
+
+
+@router.post("/integrations/{source}")
+async def ingest_open_source_telemetry(source: str, file: UploadFile = File(...)):
+    """Convert supported Zeek, Suricata, Wazuh logs into a local dataset."""
+    suffix = Path(file.filename or "").suffix.casefold()
+    temp_id = uuid4().hex
+    temp_path = UPLOADS / f"{temp_id}{suffix}"
+    try:
+        raw = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Telemetry file exceeds the 100 MB upload limit.")
+        temp_path.write_bytes(raw)
+        source = source.casefold()
+        if source == "sigma":
+            if suffix not in {".yml", ".yaml"}:
+                raise HTTPException(status_code=415, detail="Sigma import requires a YAML rule file.")
+            return load_sigma_rule(temp_path)
+        if source == "zeek":
+            frame = load_zeek_conn(temp_path)
+        elif source == "suricata":
+            frame = load_suricata_eve(temp_path)
+        elif source == "wazuh":
+            frame = load_wazuh_alerts(temp_path)
+        else:
+            raise HTTPException(status_code=404, detail="Supported integrations: zeek, suricata, wazuh, sigma.")
+        if frame.empty:
+            raise HTTPException(status_code=422, detail="No telemetry records were found.")
+        dataset_id = uuid4().hex
+        output = UPLOADS / f"{dataset_id}.csv"
+        frame.to_csv(output, index=False)
+        import hashlib
+        profile = {
+            "dataset_type": source, "rows": len(frame), "columns": len(frame.columns),
+            "numeric_columns": len(frame.select_dtypes(include="number").columns),
+            "label_column": None, "label_distribution": None,
+            "sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+            "warnings": ["Telemetry was ingested as event data; it is not a labelled benchmark dataset."],
+        }
+        metadata = {"dataset_id": dataset_id, "original_filename": Path(file.filename or source).name,
+                    "bytes": output.stat().st_size, "path": str(output), "profile": profile,
+                    "source": source}
+        (UPLOADS / f"{dataset_id}.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        return {"dataset_id": dataset_id, **profile}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not ingest {source} telemetry: {type(exc).__name__}: {exc}") from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
+        await file.close()
 
 
 @router.get("/exports/{filename}")
