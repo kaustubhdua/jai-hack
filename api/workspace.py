@@ -227,6 +227,8 @@ def list_experiments(limit: int = 50):
 def _experiment_model(experiment_id: int) -> tuple[Path, dict[str, Any]]:
     for row in STORE.list(200):
         if row["id"] == experiment_id:
+            if row["status"] != "COMPLETED":
+                break
             key = row["name"]
             model = MODELS / key / "model.joblib"
             if model.is_file():
