@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 import re
 from typing import Any
@@ -24,7 +25,7 @@ from cybersentinel.integrations.logs import load_zeek_conn, load_suricata_eve, l
 
 router = APIRouter(prefix="/api/workspace", tags=["Analyst Workspace"])
 ROOT = Path(__file__).resolve().parent.parent
-WORKSPACE = Path("/tmp/cybersentinel-workspace") if os.environ.get("VERCEL") == "1" else ROOT / "data" / "workspace"
+WORKSPACE = Path(tempfile.gettempdir()) / "cybersentinel-workspace" if os.environ.get("VERCEL") == "1" else ROOT / "data" / "workspace"
 UPLOADS = WORKSPACE / "uploads"
 MODELS = WORKSPACE / "models"
 REPORTS = WORKSPACE / "reports"
