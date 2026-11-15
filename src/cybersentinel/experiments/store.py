@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +23,18 @@ class ExperimentStore:
                 )
             """)
 
+    @contextmanager
     def _connect(self):
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def add(self, name: str, status: str, manifest: dict[str, Any]) -> int:
         with self._connect() as connection:
