@@ -165,12 +165,14 @@ def load_dataset(
     selected_type = dataset_type.casefold()
     if selected_type == "auto":
         names = {_key(column) for column in frame.columns}
-        if {"attackcat", "sttl", "sbytes"}.issubset(names):
+        # ToN-IoT network flows can also contain src/dst IPs and a
+        # flow_duration field, so its timestamp signature must win first.
+        if {"ts", "srcip", "dstip"}.issubset(names):
+            selected_type = "ton-iot"
+        elif {"attackcat", "sttl", "sbytes"}.issubset(names):
             selected_type = "unsw-nb15"
         elif {"srcip", "dstip", "flowduration"}.issubset(names):
             selected_type = "cic-ids2017"
-        elif {"ts", "srcip", "dstip"}.issubset(names):
-            selected_type = "ton-iot"
         elif {"sbytes", "dbytes", "proto"}.issubset(names):
             selected_type = "bot-iot"
         else:
