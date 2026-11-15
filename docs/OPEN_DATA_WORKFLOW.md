@@ -58,7 +58,7 @@ classes. It creates a leakage-aware internal calibration holdout by default:
 ```bash
 python scripts/train_models.py --help
 python scripts/train_models.py \
-  --training data/local/my-training.csv \
+  --train data/local/my-training.csv \
   --label-column label \
   --model-dir models/local \
   --report-dir reports/generated/local
