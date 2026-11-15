@@ -223,7 +223,7 @@ export default function App() {
         ["Adaptive Defense", ShieldAlert],
         ["Replay Studio", Play],
         ["Model Intelligence", Cpu],
-        ["Audit & Local History", Database],
+        ["Local Replay History", Database],
         ["Settings & Health", SlidersHorizontal],
       ].map(([name, Icon]: any) => (
         <button
@@ -423,7 +423,7 @@ export default function App() {
         {activeNav === "Adaptive Defense" && <AdaptiveDefenseConsole />}
         {activeNav === "Replay Studio" && <ReplayStudio modelReady={Boolean(health?.model_ready)} />}
         {activeNav === "Model Intelligence" && <ModelIntelligenceView />}
-        {activeNav === "Audit & Local History" && <AuditHistoryView />}
+        {activeNav === "Local Replay History" && <AuditHistoryView />}
         {activeNav === "Settings & Health" && <SystemHealthView health={health} />}
 
         <footer className="footer">
