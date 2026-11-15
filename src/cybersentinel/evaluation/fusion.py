@@ -31,9 +31,12 @@ def evaluate_fusion_comparison(
     a1_classes = []
     for p in a1_predictions:
         if isinstance(p, dict):
-            a1_classes.append(str(p.get("predicted_class", "")).strip())
+            predicted = p.get("predicted_class")
         else:
-            a1_classes.append(str(p).strip())
+            # Agent contracts are dataclasses; stringifying the object silently
+            # turned every valid prediction into an unknown label in reports.
+            predicted = getattr(p, "predicted_class", p)
+        a1_classes.append(str(predicted).strip() if predicted is not None else "")
 
     # Extract A3 attributes
     a3_classes = []
