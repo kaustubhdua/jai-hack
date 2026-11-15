@@ -98,6 +98,8 @@ def normalize_dataset(
         raise ValueError("Dataset is empty.")
     if frame.columns.duplicated().any():
         raise ValueError("Dataset has duplicate column names.")
+    if label_column and label_column not in frame.columns:
+        raise ValueError(f"Label column {label_column!r} does not exist in the source dataset.")
     profile = DATASET_PROFILES.get(dataset_type.casefold(), DATASET_PROFILES["generic"])
     source_columns = list(frame.columns)
     normalized = frame.copy()
