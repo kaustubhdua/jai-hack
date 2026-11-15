@@ -210,6 +210,8 @@ def evaluate(request: EvaluateRequest):
     report.update({"experiment_id": request.experiment_id, "target_dataset_id": request.dataset_id})
     report_path = REPORTS / f"cross-eval-{request.experiment_id}-{request.dataset_id}.json"
     report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    STORE.add(f"cross-eval:{request.experiment_id}:{request.dataset_id}", "COMPLETED", report)
+    report["export"] = f"/api/workspace/exports/{report_path.name}"
     return report
 
 
@@ -239,6 +241,10 @@ def detect(experiment_id: int, dataset_id: str):
     alert_output = REPORTS / f"alerts-{experiment_id}-{dataset_id}.csv"
     result.to_csv(output, index=False)
     alerts.to_csv(alert_output, index=False)
+    STORE.add(f"detection:{experiment_id}:{dataset_id}", "COMPLETED", {
+        "rows": len(result), "alerts": len(alerts),
+        "predictions_export": str(output), "alerts_export": str(alert_output),
+    })
     return {
         "experiment_id": experiment_id, "rows": len(result), "alerts": len(alerts),
         "alert_preview": alerts.head(100).to_dict(orient="records"),
