@@ -21,6 +21,7 @@ export default function UniversalWorkspace() {
   const [label, setLabel] = useState("label");
   const [model, setModel] = useState("random_forest");
   const [mapping, setMapping] = useState("");
+  const [integration, setIntegration] = useState("zeek");
   const [profile, setProfile] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
@@ -96,6 +97,18 @@ export default function UniversalWorkspace() {
     finally { setBusy(false); }
   }
 
+  async function ingest(file?: File) {
+    if (!file) return;
+    setBusy(true); setError(""); setResult(null);
+    try {
+      const body = new FormData(); body.append("file", file);
+      const data = await payload(await apiFetch(`/api/workspace/integrations/${integration}`, { method: "POST", body }));
+      setResult(data);
+      if (data.dataset_id) { setSelected(data.dataset_id); setTarget(data.dataset_id); await refresh(); }
+    } catch (err) { setError(err instanceof Error ? err.message : "Integration import failed."); }
+    finally { setBusy(false); }
+  }
+
   return <div className="universal-workspace">
     <div className="uw-intro">
       <div><span className="uw-kicker">OPEN DATA · EXPERIMENT LAB</span><h2>Universal analyst workspace</h2>
@@ -146,6 +159,18 @@ export default function UniversalWorkspace() {
       <section className="panel uw-panel">
         <div className="panel-head"><div><div className="panel-kicker">04 · EXPERIMENT REGISTRY</div><h3>Local experiment history</h3><p>Model hashes, configuration and dataset provenance</p></div><Database size={19}/></div>
         {experiments.length ? experiments.slice(0,8).map(item=><button className="uw-experiment" key={item.id} onClick={()=>setExperiment(String(item.id))}><span><b>#{item.id} · {item.name}</b><small>{item.created_at}</small></span><em>{item.status}</em></button>) : <p className="uw-hint">No experiments yet. Train a model to create a reproducible record.</p>}
+      </section>
+      <section className="panel uw-panel">
+        <div className="panel-head"><div><div className="panel-kicker">05 · OPEN-SOURCE TELEMETRY</div><h3>Security integrations</h3><p>Import event logs and Sigma rule metadata</p></div><ShieldCheck size={19}/></div>
+        <label className="uw-label">Source format</label>
+        <select value={integration} onChange={e => setIntegration(e.target.value)}>
+          <option value="zeek">Zeek conn.log</option><option value="suricata">Suricata EVE JSONL</option>
+          <option value="wazuh">Wazuh alerts JSON</option><option value="sigma">Sigma YAML rule</option>
+        </select>
+        <label className="uw-upload"><FileUp size={20}/><b>Import {integration} file</b><span>Converted telemetry becomes a local dataset; Sigma is imported as rule metadata</span>
+          <input type="file" accept={integration === "sigma" ? ".yml,.yaml" : integration === "zeek" ? ".log,.txt" : ".json,.jsonl"} disabled={busy} onChange={e => { void ingest(e.target.files?.[0]); e.currentTarget.value = ""; }}/>
+        </label>
+        <p className="uw-hint">Import does not execute Sigma rules, capture live packets, or change firewall settings.</p>
       </section>
     </div>
     {result && <section className="panel uw-result">
