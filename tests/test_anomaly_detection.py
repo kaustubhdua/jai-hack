@@ -235,3 +235,21 @@ def test_threshold_calibration_handles_large_validation_partition():
     assert metrics["validation_rows"] == 20000
     assert metrics["benign_false_positive_rate"] <= 0.02
     assert 0.0 <= metrics["attack_recall"] <= 1.0
+
+
+def test_anomaly_result_exposes_json_serialization_contract():
+    from cybersentinel.contracts import AnomalyDetectionResult
+
+    result = AnomalyDetectionResult(
+        anomaly_score=0.87,
+        is_anomaly=True,
+        evidence=[{"feature": "Flow Duration", "observed_value": 9000000.0}],
+        status="success",
+    )
+    assert result.to_dict() == {
+        "anomaly_score": 0.87,
+        "is_anomaly": True,
+        "evidence": [{"feature": "Flow Duration", "observed_value": 9000000.0}],
+        "status": "success",
+        "message": None,
+    }
