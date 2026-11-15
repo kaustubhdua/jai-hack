@@ -1,1 +1,0 @@
--- No-op compatibility placeholder. The live schema change is tracked as migration 20261031074022.
