@@ -75,6 +75,8 @@ Use the original provider page for downloads, licence terms, citations, and coll
 
 Keep the original archive, provider URL, retrieval date, licence, citation, and SHA-256 checksum with every local dataset. Do not commit raw datasets, packet captures, personal telemetry, or generated model artifacts containing sensitive data.
 
+See [dataset adapter contracts](docs/DATASET_ADAPTERS.md) for the exact label priorities, canonical feature names, unit conversions, and rules for adding a new adapter.
+
 ## Dataset profiling and adapters
 
 Profile a local dataset before training:
