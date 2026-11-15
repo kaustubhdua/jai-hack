@@ -265,6 +265,9 @@ def detect(experiment_id: int, dataset_id: str):
     else:
         predictions = estimator.predict(X)
         result = pd.DataFrame({"prediction": predictions.astype(str)})
+        if hasattr(estimator, "predict_proba"):
+            probabilities = estimator.predict_proba(X)
+            result["confidence"] = probabilities.max(axis=1)
     benign_labels = {"BENIGN", "NORMAL", "LEGITIMATE", "0", "FALSE", "ALLOW"}
     alerts = result[~result["prediction"].astype(str).str.upper().isin(benign_labels)].copy()
     output = REPORTS / f"detections-{experiment_id}-{dataset_id}.csv"
