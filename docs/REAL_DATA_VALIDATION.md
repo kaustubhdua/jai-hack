@@ -68,6 +68,35 @@ Sample hashes:
 - Source shard 0 SHA-256: `2aada2a26d061111f4e8fb84e716f5f11264fee71abe04697d42cb89e488d047`
 - Source shard 1 SHA-256: `7c6699ae967567977dee9e9193543b515255f4e1671ca79bf9ae65e7866ffef1`
 
+## Cross-corpus transfer: UNSW-NB15 to CIC-IDS2017
+
+A separate binary transfer experiment trained on UNSW-NB15 and evaluated on CIC-IDS2017 through the same local upload/train/evaluate/detect API path. The six explicitly shared features were `flow_duration`, `destination_port`, `fwd_packets`, `bwd_packets`, `fwd_bytes`, and `bwd_bytes`. UNSW binary labels were retained; CIC labels were mapped to BENIGN=0 and all attack categories=1.
+
+| Item | Value |
+|---|---:|
+| UNSW training sample | 10,000 rows (5,000 benign / 5,000 attack) |
+| CIC evaluation sample | 8,750 rows (5,000 benign / 3,750 attack) |
+| Model | Random Forest, 100 trees, max depth 24, seed 20261115 |
+| Accuracy | **44.56%** |
+| Macro-F1 | **0.4356** |
+| Weighted-F1 | **0.4249** |
+| Feature drift index | **0.4421** |
+| Largest standardized mean shift | `flow_duration`: **1.9966** |
+
+Confusion matrix (true rows, predicted columns; classes 0=BENIGN, 1=ATTACK):
+
+```text
+              predicted 0   predicted 1
+true 0             1,367         3,633
+true 1             1,218         2,532
+```
+
+Both binary classes were present after mapping, so no unknown target labels remained. The low transfer score and large flow-duration shift are a substantive result: a model trained on one corpus does not automatically generalize to another, even when the feature schema is aligned. The evaluator exposed the distribution shift; this model must not be presented as cross-corpus production-ready. Target-domain calibration, feature harmonization, and additional source-separated validation are required before deployment.
+
+Cross-corpus sample hashes:
+- UNSW training CSV SHA-256: `a3e4cadc8d6a5d626ce85062f161b265584bf26d6086aa28e1fdf8ef210059ad`
+- CIC evaluation CSV SHA-256: `ace11f43335cf1bbcb7d973d0d1dd878702e0c87b79a997d704f3adbf9ca36fb`
+
 ## HTTP acceptance
 
 Against the deployed production host `https://jai-hack-steel.vercel.app`:
