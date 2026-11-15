@@ -1,9 +1,7 @@
 
 export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  const token = localStorage.getItem("cybersentinel_access_token");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+  // Public, account-free API: no bearer tokens or identity provider are used.
+  return fetch(input, init);
 }
 
 export async function downloadAuthenticatedFile(path: string, filename: string): Promise<void> {
