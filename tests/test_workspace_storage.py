@@ -27,3 +27,18 @@ def test_public_serverless_workspace_writes_are_disabled(monkeypatch):
     with pytest.raises(HTTPException) as error:
         workspace._require_local_workspace()
     assert error.value.status_code == 403
+
+
+def test_failed_experiment_cannot_be_used_for_inference(tmp_path, monkeypatch):
+    from cybersentinel.experiments.store import ExperimentStore
+
+    store = ExperimentStore(tmp_path / "experiments.sqlite3")
+    experiment_id = store.add("failed-model", "FAILED", {"error": "training failed"})
+    monkeypatch.setattr(workspace, "STORE", store)
+    monkeypatch.setattr(workspace, "MODELS", tmp_path / "models")
+    (tmp_path / "models" / "failed-model").mkdir(parents=True)
+    (tmp_path / "models" / "failed-model" / "model.joblib").write_bytes(b"not-a-valid-model")
+
+    with pytest.raises(HTTPException) as error:
+        workspace._experiment_model(experiment_id)
+    assert error.value.status_code == 404
