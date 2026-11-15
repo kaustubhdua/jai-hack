@@ -194,6 +194,7 @@ export default function UniversalWorkspace() {
     {result && <section className="panel uw-result">
       <div className="panel-head"><div><div className="panel-kicker">LATEST RESULT</div><h3>Experiment output</h3></div>
         {result.export && <a className="secondary-btn" href={result.export}><ArrowDownToLine size={14}/> Export CSV</a>}
+        {result.alerts_export && <a className="secondary-btn" href={result.alerts_export}><ArrowDownToLine size={14}/> Export alerts</a>}
       </div>
       <pre>{JSON.stringify(result, null, 2)}</pre>
     </section>}
