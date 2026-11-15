@@ -137,6 +137,9 @@ class XGBoostClassifier:
         values = self.imputer.transform(X)
         return self.encoder.inverse_transform(self.estimator.predict(values).astype(int))
 
+    def predict_proba(self, X):
+        return self.estimator.predict_proba(self.imputer.transform(X))
+
 
 class TorchMLP:
     """Small optional PyTorch classifier; imported only when selected."""
@@ -181,6 +184,13 @@ class TorchMLP:
         with torch.no_grad():
             indexes = self.model(torch.from_numpy(Xv)).argmax(dim=1).numpy()
         return self.classes_[indexes]
+
+    def predict_proba(self, X):
+        import torch
+        Xv = self.scaler.transform(self.imputer.transform(X)).astype("float32")
+        self.model.eval()
+        with torch.no_grad():
+            return torch.softmax(self.model(torch.from_numpy(Xv)), dim=1).numpy()
 
 
 def train_experiment(
