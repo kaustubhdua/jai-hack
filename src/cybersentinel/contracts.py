@@ -22,6 +22,10 @@ class AnomalyDetectionResult:
     status: AgentStatus = "success"
     message: str | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly representation consistent with FusionResult."""
+        return asdict(self)
+
 @dataclass
 class FusionResult:
     final_class: BenchmarkClass | None
