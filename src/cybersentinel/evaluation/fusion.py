@@ -32,6 +32,8 @@ def evaluate_fusion_comparison(
     for p in a1_predictions:
         if isinstance(p, dict):
             a1_classes.append(str(p.get("predicted_class", "")).strip())
+        elif hasattr(p, "predicted_class"):
+            a1_classes.append(str(getattr(p, "predicted_class", "") or "").strip())
         else:
             a1_classes.append(str(p).strip())
 

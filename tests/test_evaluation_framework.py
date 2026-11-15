@@ -105,3 +105,24 @@ def test_high_level_anomaly_evaluation_unwraps_calibrated_agent_score():
     assert report["roc_auc"] == 1.0
     assert report["operational_metrics"]["attack_recall"] == 1.0
     assert report["operational_metrics"]["benign_fpr"] == 0.0
+
+
+def test_fusion_comparison_extracts_typed_threat_predictions():
+    from types import SimpleNamespace
+    from cybersentinel.contracts import ThreatDetectionResult
+    from cybersentinel.evaluation.fusion import evaluate_fusion_comparison
+
+    labels = ["BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN"]
+    threat_results = [
+        ThreatDetectionResult(predicted_class=label, confidence=0.9)
+        for label in labels
+    ]
+    fusion_results = [
+        SimpleNamespace(final_class=label, action="REVIEW", evidence_status="AGREE")
+        for label in labels
+    ]
+
+    report = evaluate_fusion_comparison(labels, threat_results, fusion_results)
+
+    assert report["a1_classification_metrics"]["accuracy"] == 1.0
+    assert report["a3_fusion_classification_metrics"]["accuracy"] == 1.0
