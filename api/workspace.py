@@ -299,7 +299,7 @@ def detect(experiment_id: int, dataset_id: str):
     # Neutralize spreadsheet formulas in untrusted source context before CSV
     # export; keep numeric negative values numeric and unchanged.
     def _safe_cell(value):
-        if isinstance(value, str) and re.match(r"^[\\s\\x00-\\x1f]*[=+@-]", value):
+        if isinstance(value, str) and value.lstrip().startswith(("=", "+", "@", "-")):
             return "'" + value
         return value
 
