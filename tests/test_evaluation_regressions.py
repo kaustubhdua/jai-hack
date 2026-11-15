@@ -134,3 +134,47 @@ def test_temporal_batch_prediction_count_must_match_rows():
         evaluate_temporal_correlation(
             frame, BrokenBatchPredictor(), test_shuffled_robustness=False
         )
+
+
+def test_publication_plots_accept_saved_evaluation_report_schemas(tmp_path):
+    import pytest
+    pytest.importorskip("matplotlib")
+    from cybersentinel.evaluation.plots import generate_all_plots
+
+    bins = [
+        {"sample_count": 10, "mean_confidence": 0.7, "observed_accuracy": 0.6},
+        {"sample_count": 8, "mean_confidence": 0.9, "observed_accuracy": 0.8},
+        {"sample_count": 0, "mean_confidence": 0.0, "observed_accuracy": 0.0},
+    ]
+    anomaly = {
+        "roc_auc": 0.82,
+        "average_precision": 0.91,
+        "roc_curve": [{"fpr": 0.0, "tpr": 0.0}, {"fpr": 1.0, "tpr": 1.0}],
+        "pr_curve": [{"recall": 1.0, "precision": 0.8}, {"recall": 0.0, "precision": 1.0}],
+    }
+    calibration = {
+        "evaluation": {
+            "uncalibrated": {"ece": 0.1, "reliability_bins": bins},
+            "calibrated": {"ece": 0.12, "reliability_bins": bins},
+        }
+    }
+    matrix = [[2, 0], [0, 2]]
+    generated = generate_all_plots(
+        tmp_path,
+        classification_data={"confusion_matrix": matrix},
+        fusion_data={"confusion_matrix_after_fusion": matrix},
+        anomaly_data=anomaly,
+        generalization_data={
+            "seen_evaluation": {},
+            "unseen_evaluation": {},
+        },
+        calibration_data=calibration,
+        loao_data={"trials": {}},
+        temporal_data={},
+        defense_data={"comparison_table": {"baseline": {"name": "Baseline"}}},
+    )
+    names = {path.name for path in generated}
+    assert "anomaly_roc_pr_curves.png" in names
+    assert "calibration_reliability_diagram.png" in names
+    assert (tmp_path / "anomaly_roc_pr_curves.svg").is_file()
+    assert (tmp_path / "calibration_reliability_diagram.svg").is_file()
