@@ -41,8 +41,8 @@ class ReadyPipeline:
 
 
 def test_system_diagnostics_requires_auth_when_neon_is_configured(monkeypatch):
-    monkeypatch.setattr(index, "database_configured", lambda: "test-anon-key")
-    monkeypatch.setattr(index, "_database_user_id", lambda: "test-project.neon.co")
+    monkeypatch.setattr(index, "database_configured", lambda: True)
+    monkeypatch.setattr(index, "_database_user_id", lambda request: (None, "not_authenticated"))
     response = TestClient(index.app).get("/api/system/diagnostics")
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "AUTH_REQUIRED"
