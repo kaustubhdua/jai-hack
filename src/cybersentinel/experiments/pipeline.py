@@ -46,21 +46,41 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+_LABEL_LIKE_COLUMNS = {
+    "label", "source_label", "source_label_2", "attack_cat", "attack",
+    "category", "subcategory", "class", "target", "type", "is_attack",
+    "binary_label", "label_name", "attack_type",
+}
+
+
 def _features(frame: pd.DataFrame, config: ExperimentConfig) -> list[str]:
     if config.feature_columns:
         if config.label_column in config.feature_columns:
             raise ValueError("The target label column cannot be included in model features.")
+        suspicious = sorted(
+            name for name in config.feature_columns
+            if str(name).casefold() in _LABEL_LIKE_COLUMNS and name != config.label_column
+        )
+        if suspicious:
+            raise ValueError(f"Potential target-label leakage in feature allow-list: {suspicious}")
         missing = sorted(set(config.feature_columns) - set(frame.columns))
         if missing:
             raise ValueError(f"Configured feature columns are missing: {missing}")
         columns = list(config.feature_columns)
     else:
         excluded = set(config.drop_columns or []) | {config.label_column}
-        excluded |= {name for name in frame.columns if str(name).casefold() in {
-            "id", "flow_id", "record_id", "timestamp", "stime", "srcip", "dstip",
-            "source_ip", "destination_ip", "attack_cat", "label",
-        }}
-        columns = [name for name in frame.select_dtypes(include="number").columns if name not in excluded]
+        excluded |= {
+            name for name in frame.columns
+            if str(name).casefold() in _LABEL_LIKE_COLUMNS
+            or str(name).casefold() in {
+                "id", "flow_id", "record_id", "timestamp", "stime", "srcip",
+                "dstip", "source_ip", "destination_ip",
+            }
+        }
+        columns = [
+            name for name in frame.select_dtypes(include="number").columns
+            if name not in excluded
+        ]
     if not columns:
         raise ValueError("No numeric model features remain after feature selection.")
     return columns
@@ -73,6 +93,8 @@ def _mapped_labels(series: pd.Series, mapping: dict[str, str] | None) -> pd.Seri
     if mapping is None:
         return labels.astype(str)
     normalized_map = {str(key).strip(): str(value).strip() for key, value in mapping.items()}
+    if any(not key or not value for key, value in normalized_map.items()):
+        raise ValueError("Label mappings cannot contain empty source or target labels.")
     unknown = sorted(set(labels.astype(str)) - set(normalized_map))
     if unknown:
         raise ValueError(f"Label mapping does not cover source labels: {unknown[:20]}")
@@ -92,7 +114,7 @@ def _build_estimator(config: ExperimentConfig, classification: bool = True):
         ])
     if model == "xgboost":
         try:
-            from xgboost import XGBClassifier, XGBRegressor
+            import xgboost  # noqa: F401
         except ImportError as exc:
             raise RuntimeError("Install the optional dependency with: pip install .[xgboost]") from exc
         return XGBoostClassifier(config)
@@ -230,9 +252,11 @@ def train_experiment(
             "q75": float(X[column].quantile(0.75)),
         } for column in columns
     }
-    joblib.dump({"artifact_version": 1, "estimator": estimator, "config": asdict(config), "features": columns,
-                 "training_stats": training_stats,
-                 "classes": sorted(labels.unique().tolist()) if labels is not None else None}, model_path)
+    joblib.dump({
+        "artifact_version": 1, "estimator": estimator, "config": asdict(config),
+        "features": columns, "training_stats": training_stats,
+        "classes": sorted(labels.unique().tolist()) if labels is not None else None,
+    }, model_path)
     manifest = {
         "artifact_version": 1, "model_version": "cybersentinel-experiment-v1",
         "model": config.model, "config": asdict(config), "features": columns,
@@ -298,6 +322,7 @@ def evaluate_cross_dataset(
     known = set(bundle["classes"])
     unknown = sorted(set(y_true) - known)
     y_pred = estimator.predict(X)
+    target_known = sorted(set(y_true) & known)
     return {
         "mode": "cross_dataset_classification", "rows": len(target),
         "accuracy": float(accuracy_score(y_true, y_pred)),
@@ -308,7 +333,11 @@ def evaluate_cross_dataset(
             y_true, y_pred, labels=list(bundle["classes"]) + unknown
         ).tolist(),
         "classes": list(bundle["classes"]) + unknown, "unknown_target_labels": unknown,
+        "target_class_coverage": {
+            "observed_known_classes": target_known,
+            "unobserved_training_classes": sorted(known - set(y_true)),
+        },
         "trained_features": features, "missing_features": [],
         "feature_drift": drift_summary,
-        "domain_shift_warning": bool(unknown or len(set(y_true)) != len(known) or drift_index >= 0.25),
+        "domain_shift_warning": bool(unknown or drift_index >= 0.25),
     }
