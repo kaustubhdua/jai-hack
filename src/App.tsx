@@ -65,7 +65,7 @@ export default function App() {
   const [authSession, setAuthSession] = useState<any>(null);
   const [guestMode, setGuestMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(true);
-  const session = { user: { display_name: authSession?.user?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.user?.email ?? null } };
+  const session = { user: { display_name: authSession?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.user?.email ?? null } };
   const [health, setHealth] = useState<Health | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
 
@@ -164,7 +164,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     void checkHealth();
-    if (supabase && !authSession) {
+    if (!authSession) {
       setOverview(null);
       setOverviewState("idle");
       setOverviewMessage("");
@@ -233,7 +233,7 @@ export default function App() {
   const labelCoverage = totalLabels ? Math.round(knownLabels.reduce((n, l) => n + dataset!.labels[l], 0) / totalLabels * 100) : 0;
 
   if (authLoading) return <div className="app-shell"><main className="main-content"><div className="page-wrap"><div className="workspace-loading" role="status" aria-live="polite"><span className="workspace-loading-spinner" aria-hidden="true" />Checking secure workspace session…</div></div></main></div>;
-  if (supabase && !authSession && !guestMode) return <AuthScreen onGuest={() => setGuestMode(true)} />;
+  if (!authSession && !guestMode) return <AuthScreen onGuest={() => setGuestMode(true)} />;
 
   return <div className="app-shell">
     <ParticleBackdrop />
