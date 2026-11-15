@@ -91,3 +91,46 @@ def test_loao_model_can_train_on_four_known_classes_without_inventing_fifth():
     assert prediction["predicted_class"] in {"BENIGN", "BRUTE_FORCE", "DOS", "DDOS"}
     assert "PORT_SCAN" in model.metadata["missing_training_classes"]
     assert model.metadata["allow_missing_classes"] is True
+
+
+def test_temporal_evaluation_uses_batch_predictions_without_passing_labels():
+    class BatchPredictor:
+        def predict(self, row):
+            raise AssertionError("row-wise inference should not be used when predict_frame exists")
+
+        def predict_frame(self, frame):
+            assert "label" not in frame.columns
+            return [
+                SimpleNamespace(predicted_class="BENIGN", confidence=0.99, status="success")
+                for _ in range(len(frame))
+            ]
+
+    frame = pd.DataFrame({
+        "record_id": ["a", "b", "c"],
+        "source_ip": ["192.0.2.1"] * 3,
+        "Destination Port": [21, 22, 23],
+        "label": ["PORT_SCAN"] * 3,
+    })
+    report = evaluate_temporal_correlation(
+        frame, BatchPredictor(), test_shuffled_robustness=False
+    )
+    assert report["evaluation_summary"]["prediction_errors"] == 0
+    assert report["evaluation_summary"]["total_flows_evaluated"] == 3
+
+
+def test_temporal_batch_prediction_count_must_match_rows():
+    class BrokenBatchPredictor:
+        def predict_frame(self, frame):
+            return []
+
+    frame = pd.DataFrame({
+        "record_id": ["a"],
+        "source_ip": ["192.0.2.1"],
+        "Destination Port": [21],
+        "label": ["PORT_SCAN"],
+    })
+    import pytest
+    with pytest.raises(ValueError, match="align one-to-one"):
+        evaluate_temporal_correlation(
+            frame, BrokenBatchPredictor(), test_shuffled_robustness=False
+        )
