@@ -35,7 +35,7 @@ def test_profile_rejects_empty_and_duplicate_columns():
 
 def test_read_dataset_supports_csv_and_rejects_unknown_format(tmp_path: Path):
     csv_path = tmp_path / "sample.csv"
-    csv_path.write_text("feature,label\\n1,BENIGN\\n", encoding="utf-8")
+    csv_path.write_text("feature,label\n1,BENIGN\n", encoding="utf-8")
     assert len(read_dataset(csv_path)) == 1
     unknown = tmp_path / "sample.json"
     unknown.write_text("{}", encoding="utf-8")
