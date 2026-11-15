@@ -565,16 +565,15 @@ Routes that require absent data/model artifacts return an explicit unavailable/e
 
 The documented and authoritative workflow is local/offline. The repository is connected to Vercel, but Git deployments do not include git-ignored organizer datasets or fitted models. The deployment notes record that the frontend/API bundle can be packaged while model-backed endpoints remain unavailable until authorized artifacts are provisioned.
 
-The public production console opens directly in a **read-only guest demo** for visitors without signing in. Guests can explore the overview and five-agent architecture and inspect a CSV locally in their browser; the file is not uploaded and this inspection does not run model inference. Sign-in is optional and uses the first-party CyberSentinel API account system backed by Neon Postgres. It is used for private replay history and privileged inference/replay actions. The backend independently enforces authentication on those operational routes.
+CyberSentinel is a **public, account-free application**. There are no signup, login, logout, user profiles, bearer tokens, Supabase, Neon, or hosted database dependencies. All analysis and replay endpoints are public and stateless. The browser can inspect CSV files locally; analysis requests are sent to the CyberSentinel API only when a user explicitly runs an analysis.
 
-Additional limitations documented in `docs/deployment.md`:
+- Local/offline run summaries use SQLite on the machine running the backend.
+- Vercel functions use ephemeral filesystems, so hosted replay history and audit events are not persisted. The hosted UI states this clearly instead of pretending local files are durable.
+- Model artifacts are checked into the repository, but organizer training/hidden datasets remain local and are not deployed automatically.
+- Official hidden replay and submission generation remain local/offline operations until the authorized organizer input and writable artifact storage are available.
+- A Vercel READY deployment indicates build/deployment state, not end-to-end model readiness, official replay success, or organizer acceptance.
 
-- Vercel Python functions are configured for a 300-second maximum on the free Hobby plan. This is an execution ceiling, not proof that full replay fits; official hidden replay remains disabled in the hosted runtime until durable model/input/submission storage is provisioned.
-- Local/offline run history uses SQLite. Hosted batch replay summaries and derived audit records use Neon Postgres with server-side authentication and per-user ownership checks; official hidden replay files and submission artifacts remain local-only until durable artifact storage is provisioned.
-- A Vercel READY deployment indicates build/deployment state, not end-to-end model readiness, full replay success, or official organizer acceptance.
-- Preview deployments may still be protected by Vercel SSO; the production guest demo is intended for public viewing.
-
-Do not present the hosted deployment as a production-ready live SOC service unless its data/model provisioning, durable storage, complete replay, API routes, and browser workflows have been independently tested in that environment.
+See [docs/deployment.md](docs/deployment.md) for the account-free runtime contract and deployment limitations. Do not present the hosted deployment as a live SOC service unless its model/data provisioning, complete replay, API routes, and browser workflows have been independently tested.
 
 ## Security, data, and licensing disclosures
 
