@@ -18,13 +18,13 @@ def test_local_workspace_upload_train_evaluate_detect_and_export(tmp_path, monke
     monkeypatch.setattr(workspace, "STORE", ExperimentStore(tmp_path / "experiments.sqlite3"))
 
     csv = (
-        "attack_cat,label,sbytes,sttl,source_ip\\n"
-        "Normal,0,10,64,=1+1\\n"
-        "Normal,0,12,62,192.0.2.2\\n"
-        "DoS,1,100,32,198.51.100.1\\n"
-        "DoS,1,110,30,198.51.100.2\\n"
-        "Normal,0,14,60,192.0.2.3\\n"
-        "DoS,1,120,28,198.51.100.3\\n"
+        "attack_cat,label,sbytes,sttl,source_ip\n"
+        "Normal,0,10,64,=1+1\n"
+        "Normal,0,12,62,192.0.2.2\n"
+        "DoS,1,100,32,198.51.100.1\n"
+        "DoS,1,110,30,198.51.100.2\n"
+        "Normal,0,14,60,192.0.2.3\n"
+        "DoS,1,120,28,198.51.100.3\n"
     )
     client = TestClient(app)
     uploaded = client.post(
