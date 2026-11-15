@@ -33,6 +33,7 @@ from cybersentinel.replay import ReplayEngine
 from cybersentinel.replay.submission import SubmissionValidator
 from cybersentinel.replay.input_validation import validate_replay_input
 from cybersentinel.storage.history_db import list_runs, record_run
+from api.database import AuthError, database_configured, current_user_from_request, register_user, login_user, insert_rows, select_rows, list_user_history
 import pandas as pd
 from api.evaluation import router as evaluation_router
 
@@ -89,6 +90,38 @@ def get_pipeline() -> CyberSentinelPipeline | None:
     except Exception:
         _pipeline = None
     return _pipeline
+
+
+@app.post("/api/auth/signup")
+def auth_signup(payload: dict[str, Any]):
+    if not database_configured():
+        raise HTTPException(status_code=503, detail={"code":"DATABASE_NOT_CONFIGURED","message":"Account service is not configured."})
+    try:
+        return register_user(str(payload.get("email","")), str(payload.get("password","")))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code":"SIGNUP_REJECTED","message":str(exc)})
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code":"SIGNUP_UNAVAILABLE","message":f"Account creation failed ({type(exc).__name__})."})
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: dict[str, Any]):
+    if not database_configured():
+        raise HTTPException(status_code=503, detail={"code":"DATABASE_NOT_CONFIGURED","message":"Account service is not configured."})
+    try:
+        return login_user(str(payload.get("email","")), str(payload.get("password","")))
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail={"code":"INVALID_CREDENTIALS","message":str(exc)})
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code":"LOGIN_UNAVAILABLE","message":f"Sign-in is unavailable ({type(exc).__name__})."})
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    user_id = _require_authenticated_user(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail={"code":"AUTH_REQUIRED","message":"Sign in to continue."})
+    return {"user": request.state.cybersentinel_user}
 
 
 @app.get("/")
@@ -166,7 +199,7 @@ def system_diagnostics(request: Request):
         },
         "submission_artifacts": files,
         "history_database": {"present": history_db.is_file(), "persistent": not SERVERLESS_RUNTIME, "mode": "ephemeral" if SERVERLESS_RUNTIME else "local_sqlite"},
-        "supabase": {"configured": _supabase_persistence_configured(), "auth": "required" if _supabase_persistence_configured() else "not_configured", "schema": "cybersentinel", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies", "replay_correlation_groups"]},
+        "neon_postgres": {"configured": _database_persistence_configured(), "auth": "required" if _database_persistence_configured() else "not_configured", "schema": "cybersentinel", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies", "replay_correlation_groups"]},
         "source_identity": "literal observed source IP only; missing or invalid endpoint values remain unknown and never become synthetic identities",
         "firewall": {"mode": "simulated-only", "host_firewall_modified": False},
     }
@@ -174,41 +207,18 @@ def system_diagnostics(request: Request):
 
 @app.get("/api/history")
 def get_history(request: Request, limit: int = 15):
-    """Retrieve the authenticated user's replay history from Supabase."""
-    _require_authenticated_user(request)
-    user_id, auth_error = _supabase_user_id(request)
-    key = _supabase_public_key()
-    if user_id and key and _supabase_project_host():
-        connection = http.client.HTTPSConnection(_supabase_project_host(), timeout=5)
+    """Retrieve the authenticated user's private replay and evaluation history."""
+    user_id = _require_authenticated_user(request)
+    if not user_id:
         try:
-            query = f"/rest/v1/replay_runs?select=run_id,dataset_name,total_records,blocked_records,allowed_records,policies_created,containment_rate,throughput_fps,status,created_at&order=created_at.desc&limit={max(1, min(limit, 50))}"
-            connection.request("GET", query, headers={"apikey": key, "Authorization": request.headers.get("authorization", ""), "Accept-Profile": "cybersentinel"})
-            response = connection.getresponse()
-            raw = response.read()
-            if response.status != 200:
-                return {"runs": [], "evaluation_runs": [], "source": "supabase", "error": f"supabase_http_{response.status}"}
-            runs = json.loads(raw.decode("utf-8"))
-            eval_query = f"/rest/v1/analysis_runs?select=id,dataset_name,dataset_rows,processed_rows,status,model_version,accuracy,macro_f1,created_at&order=created_at.desc&limit={max(1, min(limit, 50))}"
-            connection.request("GET", eval_query, headers={"apikey": key, "Authorization": request.headers.get("authorization", ""), "Accept-Profile": "cybersentinel"})
-            eval_response = connection.getresponse()
-            eval_raw = eval_response.read()
-            evaluation_runs = json.loads(eval_raw.decode("utf-8")) if eval_response.status == 200 else []
-            return {"runs": runs, "evaluation_runs": evaluation_runs, "source": "supabase", "evaluation_history_available": eval_response.status == 200}
-        except (OSError, TimeoutError):
-            return {"runs": [], "source": "supabase", "error": "supabase_unreachable"}
-        finally:
-            connection.close()
-    if SERVERLESS_RUNTIME:
-        return {"runs": [], "source": "supabase", "message": auth_error or "Sign in to load your private replay history."}
+            runs = list_runs(limit=limit)
+            return {"runs": [{**run, "run_id": run.get("id")} for run in runs], "evaluation_runs": [], "source": "local_sqlite"}
+        except Exception:
+            return {"runs": [], "evaluation_runs": [], "source": "local_sqlite"}
     try:
-        runs = list_runs(limit=limit)
-        normalized = [
-            {**run, "run_id": run.get("id"), "id": run.get("id")}
-            for run in runs
-        ]
-        return {"runs": normalized, "source": "local_sqlite"}
+        return list_user_history(user_id, limit)
     except Exception as exc:
-        return {"runs": [], "error": str(exc), "source": "local_sqlite"}
+        raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": f"History database unavailable ({type(exc).__name__})."})
 
 
 @app.get("/api/models/status")
@@ -234,7 +244,7 @@ def models_status():
     return {
         "status": "ready",
         "models_ready": True,
-        "supabase_persistence_configured": _supabase_persistence_configured(),
+        "database_persistence_configured": _database_persistence_configured(),
         "agents": {
             "threat_detection": {
                 "backend": pipeline.threat_agent.model.metadata.get("backend"),
@@ -274,148 +284,53 @@ def get_anomaly_agent() -> AnomalyDetectionAgent | None:
     return _anomaly_agent
 
 
-def _supabase_public_key() -> str | None:
-    return (os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("VITE_SUPABASE_ANON_KEY") or "").strip() or None
-
-
-def _supabase_project_host() -> str | None:
-    """Resolve the configured Supabase HTTPS host; never pin the app to one project."""
-    raw_url = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL") or "").strip()
-    if not raw_url:
-        return None
+def _database_user_id(request: Request) -> tuple[str | None, str | None]:
+    cached = getattr(request.state, "cybersentinel_user", None)
+    if cached:
+        return cached["id"], None
+    if not database_configured():
+        return None, "database_not_configured"
     try:
-        parsed = urlsplit(raw_url)
-        if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.port not in (None, 443)
-            or parsed.path not in ("", "/")
-            or parsed.query
-            or parsed.fragment
-        ):
-            return None
-        return parsed.hostname
-    except ValueError:
-        return None
+        user = current_user_from_request(request)
+        request.state.cybersentinel_user = user
+        return user["id"], None
+    except AuthError as exc:
+        return None, str(exc)
 
 
 def _require_authenticated_user(request: Request) -> str | None:
-    """Require Supabase identity for every hosted request; keep local development optional."""
-    if not _supabase_persistence_configured():
+    if not database_configured():
         if SERVERLESS_RUNTIME:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "SUPABASE_NOT_CONFIGURED",
-                    "message": "Hosted private routes are disabled until Supabase URL and publishable key are configured.",
-                },
-            )
+            raise HTTPException(status_code=503, detail={"code": "DATABASE_NOT_CONFIGURED", "message": "Neon Postgres and AUTH_SECRET must be configured."})
         return None
-    user_id, error = _supabase_user_id(request)
+    user_id, error = _database_user_id(request)
     if not user_id:
         raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": error or "Sign in to continue."})
     return user_id
 
 
-def _supabase_user_id(request: Request) -> tuple[str | None, str | None]:
-    """Resolve the caller through Supabase Auth; never trust a client-supplied user id."""
-    cached_user_id = getattr(request.state, "supabase_user_id", None)
-    if cached_user_id:
-        return cached_user_id, None
-    token = request.headers.get("authorization", "")
-    if not token.lower().startswith("bearer "):
-        return None, "not_authenticated"
-    key = _supabase_public_key()
-    if not key:
-        return None, "supabase_public_key_not_configured"
-    host = _supabase_project_host()
-    if not host:
-        return None, "supabase_url_not_configured"
-    connection = http.client.HTTPSConnection(host, timeout=5)
-    try:
-        connection.request("GET", "/auth/v1/user", headers={"apikey": key, "Authorization": token})
-        response = connection.getresponse()
-        raw = response.read()
-        if response.status != 200:
-            return None, "supabase_auth_rejected"
-        user = json.loads(raw.decode("utf-8"))
-        user_id = user.get("id") if isinstance(user, dict) else None
-        if user_id:
-            request.state.supabase_user_id = str(user_id)
-            return str(user_id), None
-        return None, "supabase_user_unavailable"
-    except (OSError, TimeoutError):
-        return None, "supabase_unreachable"
-    except Exception:
-        return None, "supabase_auth_error"
-    finally:
-        connection.close()
-
-
-def _supabase_insert_rows(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
-    if not rows:
-        return {"stored": True, "backend": "supabase", "rows": 0}
-    user_id, auth_error = _supabase_user_id(request)
+def _database_insert_rows(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
+    user_id, error = _database_user_id(request)
     if not user_id:
-        return {"stored": False, "reason": auth_error or "not_authenticated"}
-    key = _supabase_public_key()
-    host = _supabase_project_host()
-    if not key or not host:
-        return {"stored": False, "reason": "supabase_not_configured"}
-    token = request.headers.get("authorization", "")
-    safe_rows = [{**row, "user_id": user_id} for row in rows]
-    connection = http.client.HTTPSConnection(host, timeout=8)
+        return {"stored": False, "reason": error or "not_authenticated"}
     try:
-        connection.request(
-            "POST", f"/rest/v1/{table}",
-            body=json.dumps(safe_rows, separators=(",", ":")),
-            headers={"apikey": key, "Authorization": token, "Content-Type": "application/json", "Content-Profile": "cybersentinel", "Prefer": "return=minimal"},
-        )
-        response = connection.getresponse()
-        status = response.status
-        response.read()
-        if status not in (200, 201, 204):
-            return {"stored": False, "reason": f"supabase_http_{status}"}
-        return {"stored": True, "backend": "supabase", "rows": len(safe_rows)}
-    except (OSError, TimeoutError):
-        return {"stored": False, "reason": "supabase_unreachable"}
+        return insert_rows(table, rows, user_id)
     except Exception as exc:
-        return {"stored": False, "reason": f"supabase_error_{type(exc).__name__}"}
-    finally:
-        connection.close()
+        return {"stored": False, "reason": f"database_error_{type(exc).__name__}"}
 
 
-def _supabase_select_rows(table: str, query: str, request: Request) -> dict[str, Any]:
-    """Read only allow-listed user-scoped audit records through the caller's JWT."""
-    if table not in {"replay_runs", "replay_policies", "replay_correlation_groups"}:
-        return {"stored": False, "reason": "table_not_allowed", "rows": []}
-    user_id, auth_error = _supabase_user_id(request)
-    key = _supabase_public_key()
-    host = _supabase_project_host()
-    if not user_id or not key or not host:
-        return {"stored": False, "reason": auth_error or "supabase_not_configured", "rows": []}
-    connection = http.client.HTTPSConnection(host, timeout=8)
+def _database_select_rows(table: str, query: str, request: Request) -> dict[str, Any]:
+    user_id, error = _database_user_id(request)
+    if not user_id:
+        return {"stored": False, "reason": error or "not_authenticated", "rows": []}
     try:
-        connection.request("GET", f"/rest/v1/{table}?{query}", headers={
-            "apikey": key, "Authorization": request.headers.get("authorization", ""),
-            "Accept-Profile": "cybersentinel",
-        })
-        response = connection.getresponse()
-        raw = response.read()
-        if response.status != 200:
-            return {"stored": False, "reason": f"supabase_http_{response.status}", "rows": []}
-        payload = json.loads(raw.decode("utf-8"))
-        if not isinstance(payload, list):
-            return {"stored": False, "reason": "invalid_supabase_response", "rows": []}
-        return {"stored": True, "rows": payload}
-    except (OSError, TimeoutError):
-        return {"stored": False, "reason": "supabase_unreachable", "rows": []}
+        return select_rows(table, query, user_id)
     except Exception as exc:
-        return {"stored": False, "reason": f"supabase_error_{type(exc).__name__}", "rows": []}
-    finally:
-        connection.close()
+        return {"stored": False, "reason": f"database_error_{type(exc).__name__}", "rows": []}
+
+
+def _database_persistence_configured() -> bool:
+    return database_configured()
 
 
 def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, source: str = "agent2_independent") -> dict[str, Any]:
@@ -432,7 +347,7 @@ def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, sour
         "evidence": payload.get("evidence") or [],
         "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
     }
-    return _supabase_insert_rows("agent2_inference_events", [record], request)
+    return _database_insert_rows("agent2_inference_events", [record], request)
 
 
 def _persist_flow_events(results: list[dict[str, Any]], request: Request, source: str) -> dict[str, Any]:
@@ -463,9 +378,9 @@ def _persist_flow_events(results: list[dict[str, Any]], request: Request, source
                 "evidence": anomaly.get("evidence") or [],
                 "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
             })
-    flow_status = {"stored": True, "rows": 0} if not records else _supabase_insert_rows("flow_analysis_events", records, request)
+    flow_status = {"stored": True, "rows": 0} if not records else _database_insert_rows("flow_analysis_events", records, request)
     for offset in range(0, len(agent2_records), 100):
-        status = _supabase_insert_rows("agent2_inference_events", agent2_records[offset:offset + 100], request)
+        status = _database_insert_rows("agent2_inference_events", agent2_records[offset:offset + 100], request)
         if not status.get("stored"):
             return {"stored": False, "flow_events": flow_status, "agent2_events": status}
     return {"stored": bool(flow_status.get("stored")), "flow_events": flow_status, "agent2_rows": len(agent2_records)}
@@ -503,11 +418,11 @@ def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Req
             "expires_after_record_id": str(policy["expires_after_record_id"]),
         })
     for offset in range(0, len(decisions), 250):
-        outcome = _supabase_insert_rows("replay_decisions", decisions[offset:offset + 250], request)
+        outcome = _database_insert_rows("replay_decisions", decisions[offset:offset + 250], request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions": outcome, "policies_saved": 0}
     if policies:
-        outcome = _supabase_insert_rows("replay_policies", policies, request)
+        outcome = _database_insert_rows("replay_policies", policies, request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions_saved": len(decisions), "policies": outcome}
     groups = []
@@ -526,7 +441,7 @@ def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Req
             "evidence": group.get("evidence") or [],
         })
     if groups:
-        outcome = _supabase_insert_rows("replay_correlation_groups", groups, request)
+        outcome = _database_insert_rows("replay_correlation_groups", groups, request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups": outcome}
     return {"stored": True, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups_saved": len(groups)}
@@ -544,11 +459,11 @@ def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any],
         "elapsed_seconds": metrics.get("elapsed_seconds"),
         "status": status, "metadata": metadata or {},
     }
-    return _supabase_insert_rows("replay_runs", [record], request)
+    return _database_insert_rows("replay_runs", [record], request)
 
 
-def _supabase_persistence_configured() -> bool:
-    return bool(_supabase_public_key() and _supabase_project_host())
+def _database_persistence_configured() -> bool:
+    return bool(_Neon Postgres_public_key() and _Neon Postgres_project_host())
 
 
 @app.post("/api/agents/anomaly/score")
@@ -568,7 +483,7 @@ def score_anomaly(payload: dict[str, Any], request: Request):
     if result.status != "success":
         raise HTTPException(status_code=422, detail={"code": "AGENT_2_SCORING_ERROR", "message": result.message or "Anomaly scoring failed."})
     response = result.to_dict()
-    response["supabase_persistence"] = _persist_agent2_event(result, request)
+    response["database_persistence"] = _persist_agent2_event(result, request)
     return response
 
 
@@ -595,7 +510,7 @@ def analyze(payload: dict[str, Any], request: Request):
     threat_metadata = getattr(threat_model, "metadata", {}) or {}
     if flow.get("record_id") is not None:
         analysis["record_id"] = str(flow["record_id"])
-    analysis["supabase_persistence"] = _persist_flow_events([analysis], request, "single_flow")
+    analysis["database_persistence"] = _persist_flow_events([analysis], request, "single_flow")
     analysis["model_provenance"] = {
         "a1_confidence_calibrated": bool(threat_metadata.get("confidence_calibrated", False)),
         "a2_score_is_probability": False,
@@ -621,7 +536,7 @@ def analyze_batch(payload: BatchAnalyzeRequest, request: Request):
         if flow.get("record_id") is not None:
             result["record_id"] = str(flow["record_id"])
     persistence = _persist_flow_events(results, request, "batch_replay")
-    return {"total_analyzed": len(results), "actions": actions, "results": results, "supabase_persistence": persistence}
+    return {"total_analyzed": len(results), "actions": actions, "results": results, "database_persistence": persistence}
 
 
 @app.post("/api/fusion/simulate")
@@ -644,7 +559,7 @@ def simulate_fusion(payload: dict[str, Any], request: Request):
     anomaly = AnomalyDetectionResult(anomaly_score=float(anomaly_score), is_anomaly=is_anomaly)
     result = EvidenceFusionAgent().fuse(threat, anomaly)
     response = result.to_dict()
-    response["supabase_persistence"] = _supabase_insert_rows("flow_analysis_events", [{
+    response["database_persistence"] = _database_insert_rows("flow_analysis_events", [{
         "source": "fusion_simulation", "predicted_class": predicted,
         "anomaly_score": float(anomaly_score), "is_anomaly": is_anomaly,
         "final_class": response.get("final_class"), "evidence_status": response.get("evidence_status"),
@@ -700,7 +615,7 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
         for group in engine.correlation_agent.active_groups.values()
     ]
 
-    # Hosted runs must use Supabase as the durable source of truth. SQLite is
+    # Hosted runs must use Neon Postgres as the durable source of truth. SQLite is
     # retained only for local development and is never written on Vercel.
     run_id = f"RUN-{time.time_ns()}"
     metrics = results["metrics"]
@@ -727,7 +642,7 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
 
     return {
         "run_id": run_id,
-        "supabase_persistence": cloud_persistence,
+        "database_persistence": cloud_persistence,
         "metrics": metrics,
         "policies_sample": results["policy_rows"][:20],
         "replay_sample": results["replay_rows"][:30],
@@ -742,7 +657,7 @@ def run_official_replay(request: Request):
     if SERVERLESS_RUNTIME:
         raise HTTPException(status_code=503, detail={
             "code": "OFFICIAL_REPLAY_REQUIRES_ARTIFACT_STORAGE",
-            "message": "Official replay is not enabled in the hosted runtime until verified model/input artifacts and durable submission storage are provisioned. Use the reproducible offline runner; hosted audit history remains in Supabase.",
+            "message": "Official replay is not enabled in the hosted runtime until verified model/input artifacts and durable submission storage are provisioned. Use the reproducible offline runner; hosted audit history remains in Neon Postgres.",
         })
     pipeline = get_pipeline()
     if pipeline is None:
@@ -826,7 +741,7 @@ def run_official_replay(request: Request):
         cloud_persistence["artifacts"] = artifact_persistence
         summary = {
             "run_id": run_id,
-            "supabase_persistence": cloud_persistence,
+            "database_persistence": cloud_persistence,
             "source": "installed_unlabelled_hidden_replay_input",
             "records_processed": int(metrics["total_records"]),
             "artifacts": {
@@ -852,7 +767,7 @@ def run_official_replay(request: Request):
         (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return {
             "run_id": run_id,
-            "supabase_persistence": cloud_persistence,
+            "database_persistence": cloud_persistence,
             "metrics": metrics,
             "validation": validation,
             "files": {name: {"path": f"outputs/submission/{name}", "rows": len(results[key])}
@@ -1013,7 +928,7 @@ def save_evaluation_snapshot(payload: dict[str, Any], request: Request):
         "status": status, "model_version": str(payload.get("model_version") or "unknown")[:120],
         "accuracy": metrics["accuracy"], "macro_f1": metrics["macro_f1"], "summary": summary,
     }
-    return {"supabase_persistence": _supabase_insert_rows("analysis_runs", [record], request)}
+    return {"database_persistence": _database_insert_rows("analysis_runs", [record], request)}
 
 
 @app.get("/api/overview")
@@ -1183,16 +1098,16 @@ def get_flows_sample(request: Request, limit: int = 50, offset: int = 0, class_f
 def get_policies(request: Request, limit: int = 50, offset: int = 0):
     """Retrieve policies generated during replay from outputs/submission/policies.csv."""
     _require_authenticated_user(request)
-    if _supabase_persistence_configured():
-        latest = _supabase_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
+    if _database_persistence_configured():
+        latest = _database_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
         if not latest["stored"]:
-            return {"policies": [], "total": 0, "source": "supabase", "error": latest["reason"]}
+            return {"policies": [], "total": 0, "source": "neon_postgres", "error": latest["reason"]}
         if not latest["rows"]:
-            return {"policies": [], "total": 0, "source": "supabase"}
+            return {"policies": [], "total": 0, "source": "neon_postgres"}
         run_id = latest["rows"][0]["run_id"]
         query = f"select=policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id,created_at&run_id=eq.{run_id}&order=created_at.desc&limit={limit}&offset={offset}"
-        result = _supabase_select_rows("replay_policies", query, request)
-        return {"policies": result["rows"], "total": len(result["rows"]), "offset": offset, "limit": limit, "source": "supabase", "error": result.get("reason")}
+        result = _database_select_rows("replay_policies", query, request)
+        return {"policies": result["rows"], "total": len(result["rows"]), "offset": offset, "limit": limit, "source": "neon_postgres", "error": result.get("reason")}
     pol_file = BASE_DIR / "outputs" / "submission" / "policies.csv"
     if not pol_file.is_file():
         return {"policies": [], "total": 0, "source": "local"}
@@ -1267,7 +1182,7 @@ def test_policy_prefilter(payload: dict[str, Any], request: Request):
             "status": "NO_MATCHING_POLICY",
             "message": f"No active policy matches source IP {source_ip} at seq {current_step}.",
         }
-    response["supabase_persistence"] = _supabase_insert_rows("flow_analysis_events", [{
+    response["database_persistence"] = _database_insert_rows("flow_analysis_events", [{
         "source": "policy_simulation", "record_id": str(current_step),
         "action": response["action"], "rationale": [response["status"], response["message"]],
     }], request)
@@ -1281,18 +1196,18 @@ def get_correlation_groups(request: Request, limit: int = 20):
     _require_authenticated_user(request)
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 200.")
-    if _supabase_persistence_configured():
-        latest = _supabase_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
+    if _database_persistence_configured():
+        latest = _database_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
         if not latest["stored"]:
-            raise HTTPException(status_code=503, detail={"code": "SUPABASE_READ_FAILED", "message": latest["reason"]})
+            raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": latest["reason"]})
         if not latest["rows"]:
-            return {"groups": [], "total": 0, "source": "supabase", "synthetic": False}
+            return {"groups": [], "total": 0, "source": "neon_postgres", "synthetic": False}
         run_id = latest["rows"][0]["run_id"]
         query = f"select=group_id,attack_type,source_identity,target_endpoints,member_record_ids,flow_count,start_record_id,end_record_id,confidence,evidence,created_at&run_id=eq.{run_id}&order=created_at.desc&limit={limit}"
-        result = _supabase_select_rows("replay_correlation_groups", query, request)
+        result = _database_select_rows("replay_correlation_groups", query, request)
         if not result["stored"]:
-            raise HTTPException(status_code=503, detail={"code": "SUPABASE_READ_FAILED", "message": result["reason"]})
-        return {"groups": result["rows"], "total": len(result["rows"]), "source": "supabase_latest_replay", "synthetic": False}
+            raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": result["reason"]})
+        return {"groups": result["rows"], "total": len(result["rows"]), "source": "Neon Postgres_latest_replay", "synthetic": False}
     return {
         "groups": _LAST_CORRELATION_GROUPS[:limit],
         "total": len(_LAST_CORRELATION_GROUPS),
