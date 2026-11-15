@@ -50,3 +50,19 @@ classes that exist only in the target dataset.
 5. Add small synthetic fixtures; do not commit the original dataset.
 6. Record provider URL, licence, retrieval date, and source checksum in the
    dataset manifest or experiment notes.
+
+
+## Label precedence and leakage protection
+
+For UNSW-NB15, `attack_cat` is the preferred multiclass target when both
+`attack_cat` and the binary `label` field are present. The original binary
+field is retained as `source_label` for auditability, but it is excluded from
+automatic feature selection. Explicit feature allow-lists also reject known
+label-like columns to reduce accidental target leakage. If binary classification
+is desired instead, prepare/select the intended target explicitly and document
+the mapping in the experiment configuration.
+
+Cross-dataset reports distinguish unknown target labels from training classes
+that simply do not occur in the target sample. Missing class coverage alone is
+not reported as feature-domain shift; feature drift remains a descriptive
+distribution diagnostic, not a substitute for labelled performance metrics.
