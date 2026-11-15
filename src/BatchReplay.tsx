@@ -16,7 +16,6 @@ type BatchResponse = {
   actions: Record<"ALLOW" | "BLOCK" | "REVIEW", number>;
   results: ReplayRow[];
   class_counts: Record<string, number>;
-  supabase_persistence?: { stored: boolean; rows?: number; reason?: string; flow_events?: { stored: boolean; rows?: number; reason?: string }; agent2_rows?: number };
 };
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
@@ -29,7 +28,6 @@ function emptySummary(): BatchResponse {
     actions: { ALLOW: 0, BLOCK: 0, REVIEW: 0 },
     results: [],
     class_counts: {},
-    supabase_persistence: { stored: true, rows: 0 },
   };
 }
 
@@ -128,7 +126,6 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
         actions: { ...aggregate.actions },
         results: [...aggregate.results],
         class_counts: { ...aggregate.class_counts },
-        supabase_persistence: aggregate.supabase_persistence ? { ...aggregate.supabase_persistence } : undefined,
       });
     };
 
@@ -182,15 +179,6 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
         }
 
         aggregate.total_analyzed += payload.total_analyzed;
-        const persistence = payload.supabase_persistence;
-        if (!persistence?.stored) {
-          aggregate.supabase_persistence = { stored: false, reason: persistence?.reason || "not_confirmed" };
-        } else if (aggregate.supabase_persistence?.stored) {
-          aggregate.supabase_persistence.rows =
-            Number(aggregate.supabase_persistence.rows || 0) +
-            Number(persistence.flow_events?.rows || 0) +
-            Number(persistence.agent2_rows || 0);
-        }
         for (const action of ["ALLOW", "BLOCK", "REVIEW"] as const) {
           aggregate.actions[action] += actionCounts[action];
         }
@@ -255,7 +243,7 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
   return <section className="panel dataset-panel" style={{ marginBottom: 22 }}>
     <div className="panel-head">
       <div><div className="panel-kicker">OFFLINE DATASET REPLAY</div><h3>Batch flow analysis</h3>
-        <p>Validate a real CSV, then stream its rows to the authenticated inference API in bounded batches. The original CSV file is not uploaded as a single file.</p></div>
+        <p>Validate a real CSV, then stream its rows to the public inference API in bounded batches. The original CSV file is not uploaded as a single file.</p></div>
       <span className="panel-icon"><FileSpreadsheet size={18}/></span>
     </div>
     <label className="upload-zone" style={{ display: "flex", alignItems: "center", gap: 12, cursor: busy || parsing ? "not-allowed" : "pointer" }}>
@@ -288,8 +276,8 @@ export function BatchReplay({ modelReady }: { modelReady: boolean }) {
       <div className="table-scroll"><table><thead><tr><th>#</th><th>Final class</th><th>Action</th><th>Evidence</th></tr></thead>
         <tbody>{summary.results.slice(0, 20).map((row, index) => <tr key={index}><td>{index + 1}</td><td>{row.final_class ?? "Unconfirmed"}</td><td>{row.action}</td><td>{row.evidence_status}</td></tr>)}</tbody>
       </table></div>
-      <div className="empty-inline" style={{ marginTop: 12 }}>Supabase audit: {summary.supabase_persistence?.stored ? `${Number(summary.supabase_persistence.rows || 0).toLocaleString()} derived flow events saved to your private account.` : `Cloud persistence was not confirmed (${summary.supabase_persistence?.reason || "not reported"}).`}</div>
-      <small>Showing the first 20 of {summary.total_analyzed.toLocaleString()} processed rows. Only derived analysis metadata is stored in Supabase; raw CSV rows are streamed from the browser in bounded batches.</small>
+      <div className="empty-inline" style={{ marginTop: 12 }}>Batch inference is stateless. Results are returned to this browser; no cloud database or account is used.</div>
+      <small>Showing the first 20 of {summary.total_analyzed.toLocaleString()} processed rows. No cloud audit database is used. Raw CSV rows are streamed from the browser in bounded batches.</small>
     </div>}
   </section>;
 }

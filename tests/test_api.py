@@ -40,12 +40,20 @@ class ReadyPipeline:
         return [self.analyze(flow) for flow in flows]
 
 
-def test_system_diagnostics_requires_auth_when_neon_is_configured(monkeypatch):
-    monkeypatch.setattr(index, "database_configured", lambda: True)
-    monkeypatch.setattr(index, "_database_user_id", lambda request: (None, "not_authenticated"))
+def test_system_diagnostics_is_public_and_reports_no_cloud_database():
     response = TestClient(index.app).get("/api/system/diagnostics")
-    assert response.status_code == 401
-    assert response.json()["detail"]["code"] == "AUTH_REQUIRED"
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["api"]["available"] is True
+    assert "neon_postgres" not in payload
+    assert "supabase" not in str(payload).lower()
+
+
+def test_account_endpoints_are_removed():
+    client = TestClient(index.app)
+    assert client.get("/api/auth/me").status_code == 404
+    assert client.post("/api/auth/signup", json={"email": "a@example.com", "password": "password"}).status_code == 404
+    assert client.post("/api/auth/login", json={"email": "a@example.com", "password": "password"}).status_code == 404
 
 
 def test_vercel_rewrite_routes_api_subpaths_to_central_app():
@@ -245,7 +253,6 @@ def test_submission_validation_refuses_to_claim_valid_without_source_dataset(mon
 def test_dedicated_single_flow_function_passes_request_context(monkeypatch):
     from api.analyze.index import app as dedicated_app
 
-    monkeypatch.setattr(index, "_require_authenticated_user", lambda request: None)
     monkeypatch.setattr(index, "get_pipeline", lambda: None)
     response = TestClient(dedicated_app).post("/", json={"flow": {"Flow Duration": 100}})
     assert response.status_code == 503
@@ -255,7 +262,6 @@ def test_dedicated_single_flow_function_passes_request_context(monkeypatch):
 def test_dedicated_batch_function_passes_request_context(monkeypatch):
     from api.analyze.batch import app as dedicated_app
 
-    monkeypatch.setattr(index, "_require_authenticated_user", lambda request: None)
     monkeypatch.setattr(index, "get_pipeline", lambda: None)
     response = TestClient(dedicated_app).post("/", json={"flows": [{"Flow Duration": 100}]})
     assert response.status_code == 503
@@ -263,25 +269,12 @@ def test_dedicated_batch_function_passes_request_context(monkeypatch):
 
 
 
-def test_serverless_replay_uses_neon_without_ephemeral_sqlite(monkeypatch):
+def test_serverless_replay_is_public_and_runs_without_cloud_storage(monkeypatch):
     monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
     monkeypatch.setattr(index, "_pipeline", ReadyPipeline())
-    monkeypatch.setattr(index, "_database_persistence_configured", lambda: True)
-    monkeypatch.setattr(
-        index, "_database_user_id",
-        lambda request: ("00000000-0000-4000-8000-000000000001", None),
-    )
-    monkeypatch.setattr(
-        index, "_persist_replay_run",
-        lambda *args, **kwargs: {"stored": True, "backend": "neon_postgres"},
-    )
-    monkeypatch.setattr(
-        index, "_persist_replay_artifacts",
-        lambda *args, **kwargs: {"stored": True, "decisions_saved": 2},
-    )
 
     def reject_local_sqlite_write(**kwargs):
-        raise AssertionError("Vercel must not write replay history to ephemeral SQLite")
+        raise AssertionError("Serverless replay must not claim ephemeral SQLite as durable storage")
 
     monkeypatch.setattr(index, "record_run", reject_local_sqlite_write)
     flows = [
@@ -307,15 +300,14 @@ def test_serverless_replay_uses_neon_without_ephemeral_sqlite(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["database_persistence"]["stored"] is True
-    assert payload["database_persistence"]["artifacts"]["stored"] is True
+    assert payload["metrics"]["total_records"] == 2
 
 
-def test_hosted_private_routes_fail_closed_without_neon(monkeypatch):
+def test_serverless_history_is_explicitly_stateless(monkeypatch):
     monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
-    monkeypatch.setattr(index, "_database_persistence_configured", lambda: False)
-
     response = TestClient(index.app).get("/api/history")
-
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "DATABASE_NOT_CONFIGURED"
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runs"] == []
+    assert payload["source"] == "stateless_serverless"
+    assert payload["persistent"] is False

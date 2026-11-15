@@ -32,7 +32,6 @@ from cybersentinel.replay import ReplayEngine
 from cybersentinel.replay.submission import SubmissionValidator
 from cybersentinel.replay.input_validation import validate_replay_input
 from cybersentinel.storage.history_db import list_runs, record_run
-from api.database import AuthError, database_configured, current_user_from_request, register_user, login_user, insert_rows, select_rows, list_user_history
 import pandas as pd
 from api.evaluation import router as evaluation_router
 
@@ -91,38 +90,6 @@ def get_pipeline() -> CyberSentinelPipeline | None:
     return _pipeline
 
 
-@app.post("/api/auth/signup")
-def auth_signup(payload: dict[str, Any]):
-    if not database_configured():
-        raise HTTPException(status_code=503, detail={"code":"DATABASE_NOT_CONFIGURED","message":"Account service is not configured."})
-    try:
-        return register_user(str(payload.get("email","")), str(payload.get("password","")))
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"code":"SIGNUP_REJECTED","message":str(exc)})
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail={"code":"SIGNUP_UNAVAILABLE","message":f"Account creation failed ({type(exc).__name__})."})
-
-
-@app.post("/api/auth/login")
-def auth_login(payload: dict[str, Any]):
-    if not database_configured():
-        raise HTTPException(status_code=503, detail={"code":"DATABASE_NOT_CONFIGURED","message":"Account service is not configured."})
-    try:
-        return login_user(str(payload.get("email","")), str(payload.get("password","")))
-    except AuthError as exc:
-        raise HTTPException(status_code=401, detail={"code":"INVALID_CREDENTIALS","message":str(exc)})
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail={"code":"LOGIN_UNAVAILABLE","message":f"Sign-in is unavailable ({type(exc).__name__})."})
-
-
-@app.get("/api/auth/me")
-def auth_me(request: Request):
-    user_id = _require_authenticated_user(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail={"code":"AUTH_REQUIRED","message":"Sign in to continue."})
-    return {"user": request.state.cybersentinel_user}
-
-
 @app.get("/")
 @app.get("/api")
 @app.get("/health")
@@ -155,8 +122,7 @@ def health():
 
 @app.get("/api/system/diagnostics")
 def system_diagnostics(request: Request):
-    """Expose actual local artifact presence only to an authenticated analyst."""
-    _require_authenticated_user(request)
+    """Expose actual local artifact presence to any public workspace visitor."""
     dataset_candidates = (BASE_DIR / "data" / "processed" / "hidden_replay_input.csv", BASE_DIR / "data" / "processed" / "hidden_replay_input.parquet")
     dataset = next((path for path in dataset_candidates if path.is_file()), dataset_candidates[-1])
     history_db = BASE_DIR / "data" / "cybersentinel_history.db"
@@ -198,7 +164,6 @@ def system_diagnostics(request: Request):
         },
         "submission_artifacts": files,
         "history_database": {"present": history_db.is_file(), "persistent": not SERVERLESS_RUNTIME, "mode": "ephemeral" if SERVERLESS_RUNTIME else "local_sqlite"},
-        "neon_postgres": {"configured": _database_persistence_configured(), "auth": "required" if _database_persistence_configured() else "not_configured", "schema": "cybersentinel", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies", "replay_correlation_groups"]},
         "source_identity": "literal observed source IP only; missing or invalid endpoint values remain unknown and never become synthetic identities",
         "firewall": {"mode": "simulated-only", "host_firewall_modified": False},
     }
@@ -206,18 +171,19 @@ def system_diagnostics(request: Request):
 
 @app.get("/api/history")
 def get_history(request: Request, limit: int = 15):
-    """Retrieve the authenticated user's private replay and evaluation history."""
-    user_id = _require_authenticated_user(request)
-    if not user_id:
-        try:
-            runs = list_runs(limit=limit)
-            return {"runs": [{**run, "run_id": run.get("id")} for run in runs], "evaluation_runs": [], "source": "local_sqlite"}
-        except Exception:
-            return {"runs": [], "evaluation_runs": [], "source": "local_sqlite"}
+    """Return local SQLite history; hosted serverless runs are intentionally stateless."""
+    if limit < 1 or limit > 50:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 50.")
+    if SERVERLESS_RUNTIME:
+        return {"runs": [], "evaluation_runs": [], "source": "stateless_serverless", "persistent": False,
+                "message": "Replay history is stored only when running locally; this hosted function has no external database."}
     try:
-        return list_user_history(user_id, limit)
+        runs = list_runs(limit=limit)
+        return {"runs": [{**run, "run_id": run.get("id")} for run in runs],
+                "evaluation_runs": [], "source": "local_sqlite", "persistent": True}
     except Exception as exc:
-        raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": f"History database unavailable ({type(exc).__name__})."})
+        return {"runs": [], "evaluation_runs": [], "source": "local_sqlite", "persistent": True,
+                "message": f"Local history is unavailable ({type(exc).__name__})."}
 
 
 @app.get("/api/models/status")
@@ -243,7 +209,6 @@ def models_status():
     return {
         "status": "ready",
         "models_ready": True,
-        "database_persistence_configured": _database_persistence_configured(),
         "agents": {
             "threat_detection": {
                 "backend": pipeline.threat_agent.model.metadata.get("backend"),
@@ -283,192 +248,9 @@ def get_anomaly_agent() -> AnomalyDetectionAgent | None:
     return _anomaly_agent
 
 
-def _database_user_id(request: Request) -> tuple[str | None, str | None]:
-    cached = getattr(request.state, "cybersentinel_user", None)
-    if cached:
-        return cached["id"], None
-    if not database_configured():
-        return None, "database_not_configured"
-    try:
-        user = current_user_from_request(request)
-        request.state.cybersentinel_user = user
-        return user["id"], None
-    except AuthError as exc:
-        return None, str(exc)
-
-
-def _require_authenticated_user(request: Request) -> str | None:
-    if not _database_persistence_configured():
-        if SERVERLESS_RUNTIME:
-            raise HTTPException(status_code=503, detail={"code": "DATABASE_NOT_CONFIGURED", "message": "Neon Postgres and AUTH_SECRET must be configured."})
-        return None
-    user_id, error = _database_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": error or "Sign in to continue."})
-    return user_id
-
-
-def _database_insert_rows(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
-    user_id, error = _database_user_id(request)
-    if not user_id:
-        return {"stored": False, "reason": error or "not_authenticated"}
-    try:
-        return insert_rows(table, rows, user_id)
-    except Exception as exc:
-        return {"stored": False, "reason": f"database_error_{type(exc).__name__}"}
-
-
-def _database_select_rows(table: str, query: str, request: Request) -> dict[str, Any]:
-    user_id, error = _database_user_id(request)
-    if not user_id:
-        return {"stored": False, "reason": error or "not_authenticated", "rows": []}
-    try:
-        return select_rows(table, query, user_id)
-    except Exception as exc:
-        return {"stored": False, "reason": f"database_error_{type(exc).__name__}", "rows": []}
-
-
-def _database_persistence_configured() -> bool:
-    return database_configured()
-
-
-def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, source: str = "agent2_independent") -> dict[str, Any]:
-    """Persist score metadata only; raw network-flow contents are never uploaded."""
-    payload = result.to_dict()
-    if payload.get("status") != "success" or payload.get("anomaly_score") is None or payload.get("is_anomaly") is None:
-        return {"stored": False, "reason": "unsuccessful_inference"}
-    record = {
-        "source": source,
-        "model_version": str((_anomaly_agent.metadata if _anomaly_agent else {}).get("algorithm", "IsolationForest")),
-        "anomaly_score": float(payload["anomaly_score"]),
-        "is_anomaly": bool(payload["is_anomaly"]),
-        "feature_count": len(_anomaly_agent.feature_columns) if _anomaly_agent else 0,
-        "evidence": payload.get("evidence") or [],
-        "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
-    }
-    return _database_insert_rows("agent2_inference_events", [record], request)
-
-
-def _persist_flow_events(results: list[dict[str, Any]], request: Request, source: str) -> dict[str, Any]:
-    records = []
-    agent2_records = []
-    for result in results:
-        threat = result.get("threat_detection") or {}
-        anomaly = result.get("anomaly_detection") or {}
-        records.append({
-            "source": source,
-            "record_id": str(result.get("record_id")) if result.get("record_id") is not None else None,
-            "predicted_class": threat.get("predicted_class"),
-            "anomaly_score": anomaly.get("anomaly_score"),
-            "is_anomaly": anomaly.get("is_anomaly"),
-            "final_class": result.get("final_class"),
-            "evidence_status": result.get("evidence_status"),
-            "action": result.get("action"),
-            "rationale": result.get("rationale") or [],
-            "latency_ms": result.get("latency_ms"),
-        })
-        if anomaly.get("anomaly_score") is not None and anomaly.get("is_anomaly") is not None:
-            agent2_records.append({
-                "source": "pipeline_analysis",
-                "model_version": "IsolationForest",
-                "anomaly_score": float(anomaly["anomaly_score"]),
-                "is_anomaly": bool(anomaly["is_anomaly"]),
-                "feature_count": len(_anomaly_agent.feature_columns) if _anomaly_agent else 0,
-                "evidence": anomaly.get("evidence") or [],
-                "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
-            })
-    flow_status = {"stored": True, "rows": 0} if not records else _database_insert_rows("flow_analysis_events", records, request)
-    for offset in range(0, len(agent2_records), 100):
-        status = _database_insert_rows("agent2_inference_events", agent2_records[offset:offset + 100], request)
-        if not status.get("stored"):
-            return {"stored": False, "flow_events": flow_status, "agent2_events": status}
-    return {"stored": bool(flow_status.get("stored")), "flow_events": flow_status, "agent2_rows": len(agent2_records)}
-
-
-def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Request, correlation_groups: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Persist derived decisions and defensive policies, never the raw flow feature rows."""
-    classification = results.get("classification_rows") or []
-    replay = results.get("replay_rows") or []
-    if len(classification) != len(replay):
-        return {"stored": False, "reason": "replay_output_row_mismatch"}
-    decisions = []
-    for index, (classified, decision) in enumerate(zip(classification, replay), start=1):
-        try:
-            decisions.append({
-                "run_id": run_id,
-                "record_id": str(classified["record_id"]),
-                "seq": index,
-                "predicted_class": str(classified["predicted_class"]),
-                "anomaly_score": float(classified["anomaly_score"]),
-                "evidence_status": str(classified["evidence_status"]),
-                "action": str(decision["action"]),
-                "active_policy_id": str(decision["active_policy_id"]),
-            })
-        except (KeyError, TypeError, ValueError):
-            return {"stored": False, "reason": "invalid_replay_output"}
-    policies = []
-    for policy in results.get("policy_rows") or []:
-        policies.append({
-            "run_id": run_id,
-            "policy_id": str(policy["policy_id"]),
-            "activated_after_record_id": str(policy["activated_after_record_id"]),
-            "scope_type": str(policy["scope_type"]),
-            "scope_value": str(policy["scope_value"]),
-            "expires_after_record_id": str(policy["expires_after_record_id"]),
-        })
-    for offset in range(0, len(decisions), 250):
-        outcome = _database_insert_rows("replay_decisions", decisions[offset:offset + 250], request)
-        if not outcome.get("stored"):
-            return {"stored": False, "decisions": outcome, "policies_saved": 0}
-    if policies:
-        outcome = _database_insert_rows("replay_policies", policies, request)
-        if not outcome.get("stored"):
-            return {"stored": False, "decisions_saved": len(decisions), "policies": outcome}
-    groups = []
-    for group in correlation_groups or []:
-        groups.append({
-            "run_id": run_id,
-            "group_id": str(group["group_id"]),
-            "attack_type": str(group.get("attack_type") or "UNKNOWN"),
-            "source_identity": group.get("source_identity"),
-            "target_endpoints": group.get("target_endpoints") or [],
-            "member_record_ids": group.get("member_record_ids") or [],
-            "flow_count": int(group.get("flow_count") or 0),
-            "start_record_id": group.get("start_record_id"),
-            "end_record_id": group.get("end_record_id"),
-            "confidence": float(group["confidence"]) if group.get("confidence") is not None else None,
-            "evidence": group.get("evidence") or [],
-        })
-    if groups:
-        outcome = _database_insert_rows("replay_correlation_groups", groups, request)
-        if not outcome.get("stored"):
-            return {"stored": False, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups": outcome}
-    return {"stored": True, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups_saved": len(groups)}
-
-
-def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any], status: str, request: Request, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-    record = {
-        "run_id": run_id, "dataset_name": dataset_name,
-        "total_records": int(metrics.get("total_records", 0)),
-        "blocked_records": int(metrics.get("blocked_records", 0)),
-        "allowed_records": int(metrics.get("allowed_records", 0)),
-        "policies_created": int(metrics.get("policies_created", 0)),
-        "containment_rate": metrics.get("containment_rate"),
-        "throughput_fps": metrics.get("throughput_fps"),
-        "elapsed_seconds": metrics.get("elapsed_seconds"),
-        "status": status, "metadata": metadata or {},
-    }
-    return _database_insert_rows("replay_runs", [record], request)
-
-
-def _database_persistence_configured() -> bool:
-    return database_configured()
-
-
 @app.post("/api/agents/anomaly/score")
 def score_anomaly(payload: dict[str, Any], request: Request):
     """Run Agent 2 independently without requiring Agent 1 or evidence fusion."""
-    _require_authenticated_user(request)
     agent = get_anomaly_agent()
     if agent is None:
         raise HTTPException(
@@ -482,14 +264,12 @@ def score_anomaly(payload: dict[str, Any], request: Request):
     if result.status != "success":
         raise HTTPException(status_code=422, detail={"code": "AGENT_2_SCORING_ERROR", "message": result.message or "Anomaly scoring failed."})
     response = result.to_dict()
-    response["database_persistence"] = _persist_agent2_event(result, request)
     return response
 
 
 @app.post("/api/analyze")
 @app.post("/analyze")
 def analyze(payload: dict[str, Any], request: Request):
-    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -509,7 +289,6 @@ def analyze(payload: dict[str, Any], request: Request):
     threat_metadata = getattr(threat_model, "metadata", {}) or {}
     if flow.get("record_id") is not None:
         analysis["record_id"] = str(flow["record_id"])
-    analysis["database_persistence"] = _persist_flow_events([analysis], request, "single_flow")
     analysis["model_provenance"] = {
         "a1_confidence_calibrated": bool(threat_metadata.get("confidence_calibrated", False)),
         "a2_score_is_probability": False,
@@ -520,7 +299,6 @@ def analyze(payload: dict[str, Any], request: Request):
 @app.post("/api/analyze/batch")
 @app.post("/analyze/batch")
 def analyze_batch(payload: BatchAnalyzeRequest, request: Request):
-    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -534,14 +312,12 @@ def analyze_batch(payload: BatchAnalyzeRequest, request: Request):
     for result, flow in zip(results, payload.flows):
         if flow.get("record_id") is not None:
             result["record_id"] = str(flow["record_id"])
-    persistence = _persist_flow_events(results, request, "batch_replay")
-    return {"total_analyzed": len(results), "actions": actions, "results": results, "database_persistence": persistence}
+    return {"total_analyzed": len(results), "actions": actions, "results": results}
 
 
 @app.post("/api/fusion/simulate")
 def simulate_fusion(payload: dict[str, Any], request: Request):
     """Run the production Agent 3 fusion contract against explicit A1/A2 evidence."""
-    _require_authenticated_user(request)
     predicted = str(payload.get("predicted_class", "")).upper()
     confidence = payload.get("confidence")
     anomaly_score = payload.get("anomaly_score")
@@ -558,19 +334,12 @@ def simulate_fusion(payload: dict[str, Any], request: Request):
     anomaly = AnomalyDetectionResult(anomaly_score=float(anomaly_score), is_anomaly=is_anomaly)
     result = EvidenceFusionAgent().fuse(threat, anomaly)
     response = result.to_dict()
-    response["database_persistence"] = _database_insert_rows("flow_analysis_events", [{
-        "source": "fusion_simulation", "predicted_class": predicted,
-        "anomaly_score": float(anomaly_score), "is_anomaly": is_anomaly,
-        "final_class": response.get("final_class"), "evidence_status": response.get("evidence_status"),
-        "action": response.get("action"), "rationale": response.get("rationale") or [],
-    }], request)
     return response
 
 
 @app.post("/api/replay/simulate")
 def simulate_replay(payload: ReplaySimulationRequest, request: Request):
     """Run causal chronological replay over provided flow sequence."""
-    _require_authenticated_user(request)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(
@@ -614,8 +383,8 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
         for group in engine.correlation_agent.active_groups.values()
     ]
 
-    # Hosted runs must use Neon Postgres as the durable source of truth. SQLite is
-    # retained only for local development and is never written on Vercel.
+    # Local runs are recorded in SQLite. Serverless functions remain stateless:
+    # their filesystem is ephemeral, so no cloud database or fake persistence is used.
     run_id = f"RUN-{time.time_ns()}"
     metrics = results["metrics"]
     if not SERVERLESS_RUNTIME:
@@ -631,17 +400,10 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
             elapsed_seconds=metrics["elapsed_seconds"],
             status="COMPLETED",
         )
-    cloud_persistence = _persist_replay_run(run_id, payload.dataset_name, metrics, "COMPLETED", request, {"mode": "supplied_batch_replay"})
-    artifact_persistence = (
-        _persist_replay_artifacts(results, run_id, request, _LAST_CORRELATION_GROUPS)
-        if cloud_persistence.get("stored")
-        else {"stored": False, "reason": "replay_run_not_persisted"}
-    )
-    cloud_persistence["artifacts"] = artifact_persistence
+
 
     return {
         "run_id": run_id,
-        "database_persistence": cloud_persistence,
         "metrics": metrics,
         "policies_sample": results["policy_rows"][:20],
         "replay_sample": results["replay_rows"][:30],
@@ -652,11 +414,10 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
 @app.post("/api/replay/run-official")
 def run_official_replay(request: Request):
     """Run the installed official evaluation stream and write the three submission CSVs."""
-    _require_authenticated_user(request)
     if SERVERLESS_RUNTIME:
         raise HTTPException(status_code=503, detail={
             "code": "OFFICIAL_REPLAY_REQUIRES_ARTIFACT_STORAGE",
-            "message": "Official replay is not enabled in the hosted runtime until verified model/input artifacts and durable submission storage are provisioned. Use the reproducible offline runner; hosted audit history remains in Neon Postgres.",
+            "message": "Official replay is available in the local/offline runtime only. The hosted function has ephemeral storage; use the reproducible offline runner for organizer files and durable submission artifacts.",
         })
     pipeline = get_pipeline()
     if pipeline is None:
@@ -726,21 +487,8 @@ def run_official_replay(request: Request):
                 elapsed_seconds=metrics["elapsed_seconds"],
                 status="COMPLETED" if validation.get("all_valid") else "VALIDATION_FAILED",
             )
-        cloud_persistence = _persist_replay_run(
-            run_id, eval_file.name, metrics,
-            "COMPLETED" if validation.get("all_valid") else "VALIDATION_FAILED",
-            request,
-            {"mode": "official_hidden_replay", "validation_passed": bool(validation.get("all_valid")), "correlation_groups": len(_LAST_CORRELATION_GROUPS)},
-        )
-        artifact_persistence = (
-            _persist_replay_artifacts(results, run_id, request, _LAST_CORRELATION_GROUPS)
-            if cloud_persistence.get("stored")
-            else {"stored": False, "reason": "replay_run_not_persisted"}
-        )
-        cloud_persistence["artifacts"] = artifact_persistence
         summary = {
             "run_id": run_id,
-            "database_persistence": cloud_persistence,
             "source": "installed_unlabelled_hidden_replay_input",
             "records_processed": int(metrics["total_records"]),
             "artifacts": {
@@ -766,7 +514,6 @@ def run_official_replay(request: Request):
         (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return {
             "run_id": run_id,
-            "database_persistence": cloud_persistence,
             "metrics": metrics,
             "validation": validation,
             "files": {name: {"path": f"outputs/submission/{name}", "rows": len(results[key])}
@@ -788,7 +535,6 @@ def run_official_replay(request: Request):
 @app.post("/api/replay/input/upload")
 async def upload_replay_input(request: Request, file: UploadFile = File(...)):
     """Install a real organizer CSV or the known cyber-hidden.zip without extracting paths."""
-    _require_authenticated_user(request)
     if SERVERLESS_RUNTIME:
         raise HTTPException(status_code=503, detail={
             "code": "LOCAL_RUNTIME_REQUIRED",
@@ -858,7 +604,6 @@ async def upload_replay_input(request: Request, file: UploadFile = File(...)):
 @app.get("/api/replay/validate")
 def validate_submissions(request: Request):
     """Validate submission files in outputs/submission/."""
-    _require_authenticated_user(request)
     sub_dir = BASE_DIR / "outputs" / "submission"
     if not (sub_dir / "classification.csv").is_file():
         return {
@@ -893,47 +638,9 @@ def validate_submissions(request: Request):
     return SubmissionValidator.validate_submission_bundle(sub_dir, records, source_frame=source)
 
 
-@app.post("/api/evaluation/snapshot")
-def save_evaluation_snapshot(payload: dict[str, Any], request: Request):
-    """Save a provenance-bearing evaluation summary to the caller's private history."""
-    _require_authenticated_user(request)
-    dataset_name = str(payload.get("dataset_name") or "generated-evaluation-reports").strip()[:200]
-    if not dataset_name:
-        raise HTTPException(status_code=422, detail="dataset_name must not be empty.")
-    try:
-        dataset_rows = int(payload.get("dataset_rows", 0))
-        processed_rows = int(payload.get("processed_rows", 0))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="dataset_rows and processed_rows must be integers.")
-    if dataset_rows < 0 or processed_rows < 0 or processed_rows > dataset_rows:
-        raise HTTPException(status_code=422, detail="Evaluation row counts are invalid.")
-    metrics = {}
-    for field in ("accuracy", "macro_f1"):
-        value = payload.get(field)
-        if value is None:
-            metrics[field] = None
-        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 1:
-            raise HTTPException(status_code=422, detail=f"{field} must be between 0 and 1.")
-        else:
-            metrics[field] = float(value)
-    status = str(payload.get("status") or "completed").lower()
-    if status not in {"queued", "running", "completed", "failed"}:
-        raise HTTPException(status_code=422, detail="Invalid evaluation snapshot status.")
-    summary = payload.get("summary") or {}
-    if not isinstance(summary, dict):
-        raise HTTPException(status_code=422, detail="summary must be a JSON object.")
-    record = {
-        "dataset_name": dataset_name, "dataset_rows": dataset_rows, "processed_rows": processed_rows,
-        "status": status, "model_version": str(payload.get("model_version") or "unknown")[:120],
-        "accuracy": metrics["accuracy"], "macro_f1": metrics["macro_f1"], "summary": summary,
-    }
-    return {"database_persistence": _database_insert_rows("analysis_runs", [record], request)}
-
-
 @app.get("/api/overview")
 def get_overview(request: Request):
     """Return operational replay counts without inventing hidden-set ground-truth metrics."""
-    _require_authenticated_user(request)
     sub_dir = BASE_DIR / "outputs" / "submission"
     replay_file = sub_dir / "replay.csv"
     policies_file = sub_dir / "policies.csv"
@@ -1004,7 +711,6 @@ def get_benchmarks():
 @app.get("/api/submissions/download/{filename}")
 def download_submission_file(filename: str, request: Request):
     """Download an official submission CSV or report."""
-    _require_authenticated_user(request)
     allowed = {"classification.csv", "policies.csv", "replay.csv", "summary.json", "validation_report.json"}
     if filename not in allowed:
         raise HTTPException(status_code=400, detail=f"Invalid file requested: {filename}")
@@ -1020,7 +726,6 @@ def download_submission_file(filename: str, request: Request):
 @app.get("/api/flows/sample")
 def get_flows_sample(request: Request, limit: int = 50, offset: int = 0, class_filter: str | None = None):
     """Return flow features joined to predictions/actions, never ground-truth labels."""
-    _require_authenticated_user(request)
     if limit < 1 or limit > 200 or offset < 0:
         raise HTTPException(status_code=422, detail="limit must be 1..200 and offset must be non-negative.")
 
@@ -1095,34 +800,24 @@ def get_flows_sample(request: Request, limit: int = 50, offset: int = 0, class_f
 
 @app.get("/api/policies")
 def get_policies(request: Request, limit: int = 50, offset: int = 0):
-    """Retrieve policies generated during replay from outputs/submission/policies.csv."""
-    _require_authenticated_user(request)
-    if _database_persistence_configured():
-        latest = _database_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
-        if not latest["stored"]:
-            return {"policies": [], "total": 0, "source": "neon_postgres", "error": latest["reason"]}
-        if not latest["rows"]:
-            return {"policies": [], "total": 0, "source": "neon_postgres"}
-        run_id = latest["rows"][0]["run_id"]
-        query = f"select=policy_id,activated_after_record_id,scope_type,scope_value,expires_after_record_id,created_at&run_id=eq.{run_id}&order=created_at.desc&limit={limit}&offset={offset}"
-        result = _database_select_rows("replay_policies", query, request)
-        return {"policies": result["rows"], "total": len(result["rows"]), "offset": offset, "limit": limit, "source": "neon_postgres", "error": result.get("reason")}
+    """Read policies from locally generated replay artifacts; no cloud database is used."""
+    if limit < 1 or limit > 500 or offset < 0:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500 and offset cannot be negative.")
     pol_file = BASE_DIR / "outputs" / "submission" / "policies.csv"
     if not pol_file.is_file():
-        return {"policies": [], "total": 0, "source": "local"}
+        return {"policies": [], "total": 0, "source": "local_artifacts"}
     try:
         pol_df = pd.read_csv(pol_file)
         total = len(pol_df)
         subset = pol_df.iloc[offset : offset + limit].to_dict(orient="records")
-        return {"policies": subset, "total": total, "offset": offset, "limit": limit, "source": "local"}
-    except Exception as e:
-        return {"policies": [], "total": 0, "error": str(e), "source": "local"}
+        return {"policies": subset, "total": total, "offset": offset, "limit": limit, "source": "local_artifacts"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "POLICY_FILE_INVALID", "message": f"Local policy artifact could not be read ({type(exc).__name__})."}) from exc
 
 
 @app.post("/api/policies/test")
 def test_policy_prefilter(payload: dict[str, Any], request: Request):
     """Test a policy against organizer record positions, not numeric record-ID arithmetic."""
-    _require_authenticated_user(request)
     source_ip = str(payload.get("source_ip", "")).strip()
     current_step = payload.get("current_step", 1)
     try:
@@ -1181,32 +876,15 @@ def test_policy_prefilter(payload: dict[str, Any], request: Request):
             "status": "NO_MATCHING_POLICY",
             "message": f"No active policy matches source IP {source_ip} at seq {current_step}.",
         }
-    response["database_persistence"] = _database_insert_rows("flow_analysis_events", [{
-        "source": "policy_simulation", "record_id": str(current_step),
-        "action": response["action"], "rationale": [response["status"], response["message"]],
-    }], request)
     return response
 
 
 
 @app.get("/api/correlation/groups")
 def get_correlation_groups(request: Request, limit: int = 20):
-    """Return groups observed in the latest completed replay; no fabricated fixtures."""
-    _require_authenticated_user(request)
+    """Return correlation groups from the most recent replay in this API process."""
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 200.")
-    if _database_persistence_configured():
-        latest = _database_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
-        if not latest["stored"]:
-            raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": latest["reason"]})
-        if not latest["rows"]:
-            return {"groups": [], "total": 0, "source": "neon_postgres", "synthetic": False}
-        run_id = latest["rows"][0]["run_id"]
-        query = f"select=group_id,attack_type,source_identity,target_endpoints,member_record_ids,flow_count,start_record_id,end_record_id,confidence,evidence,created_at&run_id=eq.{run_id}&order=created_at.desc&limit={limit}"
-        result = _database_select_rows("replay_correlation_groups", query, request)
-        if not result["stored"]:
-            raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": result["reason"]})
-        return {"groups": result["rows"], "total": len(result["rows"]), "source": "neon_postgres_latest_replay", "synthetic": False}
     return {
         "groups": _LAST_CORRELATION_GROUPS[:limit],
         "total": len(_LAST_CORRELATION_GROUPS),
