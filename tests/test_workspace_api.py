@@ -55,7 +55,7 @@ def test_local_workspace_upload_train_evaluate_detect_and_export(tmp_path, monke
 
     detected = client.post(f"/api/workspace/detect/{experiment_id}?dataset_id={dataset_id}")
     assert detected.status_code == 200, detected.text
-    assert detected.json()["rows"] == 6
+    assert detected.json()["rows"] == 6\n    assert "source_ip" in detected.json()["predictions"][0]
     assert detected.json()["export"].startswith("/api/workspace/exports/")
 
     exported = client.get(detected.json()["export"])
