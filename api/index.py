@@ -1206,7 +1206,7 @@ def get_correlation_groups(request: Request, limit: int = 20):
         result = _database_select_rows("replay_correlation_groups", query, request)
         if not result["stored"]:
             raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": result["reason"]})
-        return {"groups": result["rows"], "total": len(result["rows"]), "source": "Neon Postgres_latest_replay", "synthetic": False}
+        return {"groups": result["rows"], "total": len(result["rows"]), "source": "neon_postgres_latest_replay", "synthetic": False}
     return {
         "groups": _LAST_CORRELATION_GROUPS[:limit],
         "total": len(_LAST_CORRELATION_GROUPS),
