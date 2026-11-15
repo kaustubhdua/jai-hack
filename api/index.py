@@ -248,17 +248,13 @@ def get_anomaly_agent() -> AnomalyDetectionAgent | None:
     return _anomaly_agent
 
 
-def _cloud_storage_status(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
-    """Cloud audit persistence is deliberately disabled; never contact an external database."""
-    return {"stored": False, "reason": "cloud_database_removed", "mode": "stateless"}
-
-
-def _database_select_rows(table: str, query: str, request: Request) -> dict[str, Any]:
-    return {"stored": False, "reason": "cloud_database_removed", "rows": []}
+def _stateless_storage_status(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
+    """Hosted persistence is intentionally disabled; this API never contacts an external database."""
+    return {"stored": False, "reason": "hosted_persistence_disabled", "mode": "stateless"}
 
 
 def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, source: str = "agent2_independent") -> dict[str, Any]:
-    """Persist score metadata only; raw network-flow contents are never uploaded."""
+    """Describe that cloud event persistence is disabled; raw network-flow contents stay local."""
     payload = result.to_dict()
     if payload.get("status") != "success" or payload.get("anomaly_score") is None or payload.get("is_anomaly") is None:
         return {"stored": False, "reason": "unsuccessful_inference"}
@@ -271,7 +267,7 @@ def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, sour
         "evidence": payload.get("evidence") or [],
         "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
     }
-    return _cloud_storage_status("agent2_inference_events", [record], request)
+    return _stateless_storage_status("agent2_inference_events", [record], request)
 
 
 def _persist_flow_events(results: list[dict[str, Any]], request: Request, source: str) -> dict[str, Any]:
@@ -302,9 +298,9 @@ def _persist_flow_events(results: list[dict[str, Any]], request: Request, source
                 "evidence": anomaly.get("evidence") or [],
                 "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
             })
-    flow_status = {"stored": True, "rows": 0} if not records else _cloud_storage_status("flow_analysis_events", records, request)
+    flow_status = {"stored": True, "rows": 0} if not records else _stateless_storage_status("flow_analysis_events", records, request)
     for offset in range(0, len(agent2_records), 100):
-        status = _cloud_storage_status("agent2_inference_events", agent2_records[offset:offset + 100], request)
+        status = _stateless_storage_status("agent2_inference_events", agent2_records[offset:offset + 100], request)
         if not status.get("stored"):
             return {"stored": False, "flow_events": flow_status, "agent2_events": status}
     return {"stored": bool(flow_status.get("stored")), "flow_events": flow_status, "agent2_rows": len(agent2_records)}
@@ -342,11 +338,11 @@ def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Req
             "expires_after_record_id": str(policy["expires_after_record_id"]),
         })
     for offset in range(0, len(decisions), 250):
-        outcome = _cloud_storage_status("replay_decisions", decisions[offset:offset + 250], request)
+        outcome = _stateless_storage_status("replay_decisions", decisions[offset:offset + 250], request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions": outcome, "policies_saved": 0}
     if policies:
-        outcome = _cloud_storage_status("replay_policies", policies, request)
+        outcome = _stateless_storage_status("replay_policies", policies, request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions_saved": len(decisions), "policies": outcome}
     groups = []
@@ -365,7 +361,7 @@ def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Req
             "evidence": group.get("evidence") or [],
         })
     if groups:
-        outcome = _cloud_storage_status("replay_correlation_groups", groups, request)
+        outcome = _stateless_storage_status("replay_correlation_groups", groups, request)
         if not outcome.get("stored"):
             return {"stored": False, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups": outcome}
     return {"stored": True, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups_saved": len(groups)}
@@ -383,7 +379,7 @@ def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any],
         "elapsed_seconds": metrics.get("elapsed_seconds"),
         "status": status, "metadata": metadata or {},
     }
-    return _cloud_storage_status("replay_runs", [record], request)
+    return _stateless_storage_status("replay_runs", [record], request)
 
 
 @app.post("/api/agents/anomaly/score")
@@ -475,7 +471,7 @@ def simulate_fusion(payload: dict[str, Any], request: Request):
     anomaly = AnomalyDetectionResult(anomaly_score=float(anomaly_score), is_anomaly=is_anomaly)
     result = EvidenceFusionAgent().fuse(threat, anomaly)
     response = result.to_dict()
-    response["storage_status"] = _cloud_storage_status("flow_analysis_events", [{
+    response["storage_status"] = _stateless_storage_status("flow_analysis_events", [{
         "source": "fusion_simulation", "predicted_class": predicted,
         "anomaly_score": float(anomaly_score), "is_anomaly": is_anomaly,
         "final_class": response.get("final_class"), "evidence_status": response.get("evidence_status"),
@@ -839,7 +835,7 @@ def save_evaluation_snapshot(payload: dict[str, Any], request: Request):
         "status": status, "model_version": str(payload.get("model_version") or "unknown")[:120],
         "accuracy": metrics["accuracy"], "macro_f1": metrics["macro_f1"], "summary": summary,
     }
-    return {"storage_status": _cloud_storage_status("analysis_runs", [record], request)}
+    return {"storage_status": _stateless_storage_status("analysis_runs", [record], request)}
 
 
 @app.get("/api/overview")
@@ -1080,7 +1076,7 @@ def test_policy_prefilter(payload: dict[str, Any], request: Request):
             "status": "NO_MATCHING_POLICY",
             "message": f"No active policy matches source IP {source_ip} at seq {current_step}.",
         }
-    response["storage_status"] = _cloud_storage_status("flow_analysis_events", [{
+    response["storage_status"] = _stateless_storage_status("flow_analysis_events", [{
         "source": "policy_simulation", "record_id": str(current_step),
         "action": response["action"], "rationale": [response["status"], response["message"]],
     }], request)
