@@ -1,3 +1,4 @@
+import "./UniversalWorkspace.css";
 import { useCallback, useEffect, useState } from "react";
 import { Activity, AlertTriangle, ArrowDownToLine, Database, FileUp, FlaskConical, RefreshCw, ShieldCheck } from "lucide-react";
 import { apiFetch } from "./lib/api";
