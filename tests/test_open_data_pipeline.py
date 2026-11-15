@@ -146,3 +146,19 @@ def test_cross_dataset_coverage_does_not_mislabel_missing_classes_as_domain_shif
     report = evaluate_cross_dataset(tmp_path / "model.joblib", target, "label")
     assert report["target_class_coverage"]["unobserved_training_classes"] == ["attack", "scan"]
     assert report["domain_shift_warning"] is False
+
+
+def test_ton_iot_autodetection_precedes_cic_flow_signature(tmp_path):
+    path = tmp_path / "ton-iot.csv"
+    pd.DataFrame({
+        "ts": ["2025-01-01T00:00:00Z", "2025-01-01T00:00:01Z"],
+        "src_ip": ["192.0.2.1", "192.0.2.2"],
+        "dst_ip": ["198.51.100.1", "198.51.100.2"],
+        "flow_duration": [1.0, 2.0],
+        "type": ["normal", "ddos"],
+        "src_bytes": [10, 100],
+    }).to_csv(path, index=False)
+    bundle = load_dataset(path, "auto")
+    assert bundle.dataset_type == "ton-iot"
+    assert bundle.label_column == "label"
+    assert bundle.frame["label"].tolist() == ["normal", "ddos"]
