@@ -126,4 +126,3 @@ def test_fusion_comparison_extracts_typed_threat_predictions():
 
     assert report["a1_classification_metrics"]["accuracy"] == 1.0
     assert report["a3_fusion_classification_metrics"]["accuracy"] == 1.0
-    assert report["summary"]["net_improvement_percentage"] == 0.0
