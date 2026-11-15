@@ -174,7 +174,7 @@ export default function UniversalWorkspace() {
         <label className="uw-label">Number of estimators</label><input type="number" min={10} max={2000} value={nEstimators} onChange={e => setNEstimators(Number(e.target.value))}/>
         <label className="uw-label">Random seed</label><input type="number" value={randomState} onChange={e => setRandomState(Number(e.target.value))}/>
         <label className="uw-label">Feature allow-list (comma-separated, optional)</label>
-        <input value={features} onChange={e => setFeatures(e.target.value)} placeholder="Flow Duration, Protocol, Destination Port"/>
+        <input value={features} onChange={e => setFeatures(e.target.value)} placeholder="flow_duration, protocol, destination_port"/>
         <label className="uw-label">Drop columns (comma-separated, optional)</label>
         <input value={dropColumns} onChange={e => setDropColumns(e.target.value)} placeholder="Flow ID, Timestamp, Source IP"/>
         <label className="uw-label">Explicit label mapping (JSON, optional)</label>
@@ -211,7 +211,7 @@ export default function UniversalWorkspace() {
     </div>
     {result && <section className="panel uw-result">
       <div className="panel-head"><div><div className="panel-kicker">LATEST RESULT</div><h3>Experiment output</h3></div>
-        {result.export && <a className="secondary-btn" href={result.export}><ArrowDownToLine size={14}/> Export CSV</a>}
+        {result.export && <a className="secondary-btn" href={result.export}><ArrowDownToLine size={14}/> Download report</a>}
         {result.alerts_export && <a className="secondary-btn" href={result.alerts_export}><ArrowDownToLine size={14}/> Export alerts</a>}
       </div>
       <pre>{JSON.stringify(result, null, 2)}</pre>
