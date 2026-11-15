@@ -64,6 +64,18 @@ def _load_uploaded_dataset(dataset_id: str):
     return load_dataset(path, dataset_type)
 
 
+def _dataset_manifest(dataset_id: str, bundle):
+    manifest = bundle.manifest()
+    metadata_path = UPLOADS / f"{dataset_id}.json"
+    if metadata_path.is_file():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            manifest["provenance"] = metadata.get("manifest", {}).get("provenance", {})
+        except (OSError, json.JSONDecodeError, AttributeError):
+            manifest["provenance"] = {}
+    return manifest
+
+
 def _profile(path: Path, dataset_type: str = "auto", label_column: str | None = None):
     bundle = load_dataset(path, dataset_type, label_column)
     frame = bundle.frame
@@ -180,13 +192,7 @@ def train(request: TrainRequest):
     _require_local_workspace()
     path = _dataset_path(request.dataset_id)
     bundle = _load_uploaded_dataset(request.dataset_id)
-    dataset_manifest = bundle.manifest()
-    metadata_path = UPLOADS / f"{request.dataset_id}.json"
-    if metadata_path.is_file():
-        try:
-            dataset_manifest["provenance"] = json.loads(metadata_path.read_text(encoding="utf-8")).get("manifest", {}).get("provenance", {})
-        except (OSError, json.JSONDecodeError):
-            dataset_manifest["provenance"] = {}
+    dataset_manifest = _dataset_manifest(request.dataset_id, bundle)
     config = ExperimentConfig(
         model=request.model, label_column=request.label_column,
         feature_columns=request.feature_columns, drop_columns=request.drop_columns,
@@ -240,7 +246,7 @@ def evaluate(request: EvaluateRequest):
         raise HTTPException(status_code=422, detail=f"Cross-dataset evaluation failed: {type(exc).__name__}: {exc}") from exc
     report.update({
         "experiment_id": request.experiment_id, "target_dataset_id": request.dataset_id,
-        "target_dataset_manifest": target_bundle.manifest(),
+        "target_dataset_manifest": _dataset_manifest(request.dataset_id, target_bundle),
     })
     report_path = REPORTS / f"cross-eval-{request.experiment_id}-{request.dataset_id}.json"
     report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
