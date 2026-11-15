@@ -186,7 +186,7 @@ export default function UniversalWorkspace() {
       <section className="panel uw-panel">
         <div className="panel-head"><div><div className="panel-kicker">03 · DOMAIN SHIFT</div><h3>Cross-dataset evaluation</h3><p>Evaluate a trained model on a separate dataset</p></div><Activity size={19}/></div>
         <label className="uw-label">Trained experiment</label>
-        <select value={experiment} onChange={e => setExperiment(e.target.value)}><option value="">Select experiment</option>{experiments.filter(e=>e.status==="COMPLETED").map(e=><option key={e.id} value={e.id}>#{e.id} · {e.name}</option>)}</select>
+        <select value={experiment} onChange={e => setExperiment(e.target.value)}><option value="">Select experiment</option>{experiments.filter(e=>e.status==="COMPLETED" && !e.name.startsWith("cross-eval:") && !e.name.startsWith("detection:")).map(e=><option key={e.id} value={e.id}>#{e.id} · {e.name}</option>)}</select>
         <label className="uw-label">Target dataset</label>
         <select value={target} onChange={e => setTarget(e.target.value)}><option value="">Select target dataset</option>{datasets.map(d=><option key={d.dataset_id} value={d.dataset_id}>{d.original_filename}</option>)}</select>
         <div className="uw-actions"><button className="secondary-btn" disabled={!experiment || !target || busy} onClick={() => void evaluate()}>Evaluate transfer</button><button className="secondary-btn" disabled={!experiment || !target || busy} onClick={() => void detect()}><ShieldCheck size={14}/> Run detection</button></div>
