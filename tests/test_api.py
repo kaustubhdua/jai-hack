@@ -266,7 +266,7 @@ def test_dedicated_batch_function_passes_request_context(monkeypatch):
 def test_serverless_replay_uses_neon_without_ephemeral_sqlite(monkeypatch):
     monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
     monkeypatch.setattr(index, "_pipeline", ReadyPipeline())
-    monkeypatch.setattr(index, "_neon_persistence_configured", lambda: True)
+    monkeypatch.setattr(index, "_database_persistence_configured", lambda: True)
     monkeypatch.setattr(
         index, "_neon_user_id",
         lambda request: ("00000000-0000-4000-8000-000000000001", None),
@@ -313,7 +313,7 @@ def test_serverless_replay_uses_neon_without_ephemeral_sqlite(monkeypatch):
 
 def test_hosted_private_routes_fail_closed_without_neon(monkeypatch):
     monkeypatch.setattr(index, "SERVERLESS_RUNTIME", True)
-    monkeypatch.setattr(index, "_neon_persistence_configured", lambda: False)
+    monkeypatch.setattr(index, "_database_persistence_configured", lambda: False)
 
     response = TestClient(index.app).get("/api/history")
 
