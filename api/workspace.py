@@ -232,14 +232,20 @@ def _experiment_model(experiment_id: int) -> tuple[Path, dict[str, Any]]:
 def evaluate(request: EvaluateRequest):
     _require_local_workspace()
     model_path, experiment = _experiment_model(request.experiment_id)
-    target = _load_uploaded_dataset(request.dataset_id).frame
+    target_bundle = _load_uploaded_dataset(request.dataset_id)
+    target = target_bundle.frame
     try:
         report = evaluate_cross_dataset(model_path, target, request.label_column, request.label_mapping)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Cross-dataset evaluation failed: {type(exc).__name__}: {exc}") from exc
-    report.update({"experiment_id": request.experiment_id, "target_dataset_id": request.dataset_id})
+    report.update({
+        "experiment_id": request.experiment_id, "target_dataset_id": request.dataset_id,
+        "target_dataset_manifest": target_bundle.manifest(),
+    })
     report_path = REPORTS / f"cross-eval-{request.experiment_id}-{request.dataset_id}.json"
     report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    import hashlib
+    report["report_sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
     STORE.add(f"cross-eval:{request.experiment_id}:{request.dataset_id}", "COMPLETED", report)
     report["export"] = f"/api/workspace/exports/{report_path.name}"
     return report
