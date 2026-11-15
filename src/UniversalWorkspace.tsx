@@ -184,7 +184,7 @@ export default function UniversalWorkspace() {
       </section>
 
       <section className="panel uw-panel">
-        <div className="panel-head"><div><div className="panel-kicker">03 · DOMAIN SHIFT</div><h3>Cross-dataset evaluation</h3><p>Evaluate a trained model on a separate dataset</p></div><Activity size={19}/></div>
+        <div className="panel-head"><div><div className="panel-kicker">03 · DOMAIN SHIFT</div><h3>Cross-dataset evaluation</h3><p>Use a different source file; in-sample evaluation is blocked</p></div><Activity size={19}/></div>
         <label className="uw-label">Trained experiment</label>
         <select value={experiment} onChange={e => setExperiment(e.target.value)}><option value="">Select experiment</option>{experiments.filter(e=>e.status==="COMPLETED" && !e.name.startsWith("cross-eval:") && !e.name.startsWith("detection:")).map(e=><option key={e.id} value={e.id}>#{e.id} · {e.name}</option>)}</select>
         <label className="uw-label">Target dataset</label>
