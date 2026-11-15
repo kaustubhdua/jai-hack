@@ -192,6 +192,29 @@ def evaluate_anomaly_detection(
         raw_scores = [r.anomaly_score if r.anomaly_score is not None else 0.0 for r in results]
         flags = [r.is_anomaly if r.is_anomaly is not None else False for r in results]
 
+    # score_frame()/score() expose the calibrated anomaly index in [0, 1],
+    # where larger values mean more anomalous. The metric routine below expects
+    # the raw IsolationForest decision_function score (larger means more normal)
+    # and inverts it exactly once. Recover that raw score from the agent's
+    # documented sigmoid mapping to avoid reversing the ranking twice.
+    score_scale = getattr(anomaly_agent, "score_scale", None)
+    score_threshold = getattr(anomaly_agent, "threshold", None)
+    if (
+        score_scale is not None
+        and score_threshold is not None
+        and np.isfinite(float(score_scale))
+        and float(score_scale) > 0
+    ):
+        anomaly_index = np.clip(
+            np.asarray(raw_scores, dtype=np.float64),
+            np.finfo(np.float64).eps,
+            1.0 - np.finfo(np.float64).eps,
+        )
+        anomaly_logit = np.log(anomaly_index / (1.0 - anomaly_index))
+        raw_scores = (
+            float(score_threshold) - float(score_scale) * anomaly_logit
+        ).tolist()
+
     op_thresh = threshold if threshold is not None else getattr(anomaly_agent, "threshold", 0.0)
     if op_thresh is None:
         op_thresh = 0.0
