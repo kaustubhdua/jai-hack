@@ -37,17 +37,18 @@ All following tables are in `cybersentinel`:
 - `replay_correlation_groups`: Agent 4 correlation groups, observed record membership and supporting evidence for each replay run.
 - `analysis_runs`: evaluation-run summary metadata.
 
-Raw network-flow rows and challenge datasets are never uploaded. The browser/authenticated role receives only SELECT and INSERT privileges; RLS limits both to the caller's own rows. No anonymous table privileges are granted. Table and sequence defaults in this schema were probed and do not grant API-role access. PostgreSQL's global default grants EXECUTE on newly created functions to PUBLIC; a schema-level default revoke cannot override that global grant. CyberSentinel currently creates no database functions, and the shared project's global function defaults are deliberately left unchanged to avoid affecting BharatSim or GenomeGuard. If a function is added to this schema, its migration must explicitly run `REVOKE EXECUTE ON FUNCTION schema.function_name(args) FROM PUBLIC, anon, authenticated, service_role` after creation and add a privilege regression test.
+Raw network-flow rows and challenge datasets are never uploaded. The browser/authenticated role receives only SELECT and INSERT privileges; RLS limits both to the caller's own rows. No anonymous table privileges are granted. Replay decisions, policies, and correlation groups also use composite foreign keys `(run_id, user_id)` back to `replay_runs`, so a user cannot attach a child record to another tenant's run even if its run ID is guessed. Table and sequence defaults in this schema were probed and do not grant API-role access. PostgreSQL's global default grants EXECUTE on newly created functions to PUBLIC; a schema-level default revoke cannot override that global grant. CyberSentinel currently creates no database functions, and the shared project's global function defaults are deliberately left unchanged to avoid affecting BharatSim or GenomeGuard. If a function is added to this schema, its migration must explicitly run `REVOKE EXECUTE ON FUNCTION schema.function_name(args) FROM PUBLIC, anon, authenticated, service_role` after creation and add a privilege regression test.
 
 ## Migration history
 
 The shared-project bootstrap is kept separate from Supabase's global migration history because that ledger is already used by other applications in `common 1`.
 
-- Canonical shared-schema migration: `database/cybersentinel/001_init.sql`.
+- Canonical shared-schema bootstrap: `database/cybersentinel/001_init.sql`.
+- Tenant-integrity hardening: `database/cybersentinel/002_replay_owner_integrity.sql`.
 - Project-local ledger: `cybersentinel.schema_migrations`.
-- Current version: `20261115120000`.
+- Current project-local version: `20261115011500`.
 
-The older `supabase/migrations/` files describe the retired, dedicated `jai-hack` project schema and remain as historical migration records. Do not apply those public-schema migrations to `common 1`; use the isolated `database/cybersentinel/` migration instead.
+The Supabase migration runner also records subsequent DDL migrations in its project-level migration history; the DDL itself is restricted to `cybersentinel`. The older `supabase/migrations/` files describe the retired, dedicated `jai-hack` project schema and remain as historical migration records. Do not apply those public-schema migrations to `common 1`; use the isolated `database/cybersentinel/` migrations instead.
 
 ## Smoke-test checklist
 
