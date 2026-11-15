@@ -91,13 +91,7 @@ def _build_estimator(config: ExperimentConfig, classification: bool = True):
             from xgboost import XGBClassifier, XGBRegressor
         except ImportError as exc:
             raise RuntimeError("Install the optional dependency with: pip install .[xgboost]") from exc
-        return Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("model", XGBClassifier(
-                n_estimators=config.n_estimators, max_depth=config.max_depth or 6,
-                random_state=config.random_state, n_jobs=-1, eval_metric="mlogloss",
-            )),
-        ])
+        return XGBoostClassifier(config)
     if model == "isolation_forest":
         return Pipeline([
             ("imputer", SimpleImputer(strategy="median")),
@@ -109,6 +103,35 @@ def _build_estimator(config: ExperimentConfig, classification: bool = True):
     if model == "pytorch_mlp":
         return TorchMLP(config)
     raise ValueError("model must be random_forest, xgboost, isolation_forest, or pytorch_mlp")
+
+
+class XGBoostClassifier:
+    """Label-encoding wrapper because XGBoost expects contiguous integer classes."""
+    def __init__(self, config: ExperimentConfig):
+        self.config = config
+        self.imputer = SimpleImputer(strategy="median")
+        self.encoder = LabelEncoder()
+        self.estimator = None
+
+    def fit(self, X, y):
+        try:
+            from xgboost import XGBClassifier
+        except ImportError as exc:
+            raise RuntimeError("Install the optional dependency with: pip install .[xgboost]") from exc
+        values = self.imputer.fit_transform(X)
+        encoded = self.encoder.fit_transform(y)
+        self.estimator = XGBClassifier(
+            n_estimators=self.config.n_estimators,
+            max_depth=self.config.max_depth or 6,
+            random_state=self.config.random_state, n_jobs=-1,
+            eval_metric="mlogloss",
+        )
+        self.estimator.fit(values, encoded)
+        return self
+
+    def predict(self, X):
+        values = self.imputer.transform(X)
+        return self.encoder.inverse_transform(self.estimator.predict(values).astype(int))
 
 
 class TorchMLP:
@@ -225,8 +248,10 @@ def evaluate_cross_dataset(
         "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
         "weighted_f1": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
         "classification_report": classification_report(y_true, y_pred, output_dict=True, zero_division=0),
-        "confusion_matrix": confusion_matrix(y_true, y_pred, labels=bundle["classes"]).tolist(),
-        "classes": bundle["classes"], "unknown_target_labels": unknown,
+        "confusion_matrix": confusion_matrix(
+            y_true, y_pred, labels=list(bundle["classes"]) + unknown
+        ).tolist(),
+        "classes": list(bundle["classes"]) + unknown, "unknown_target_labels": unknown,
         "trained_features": features, "missing_features": [],
         "domain_shift_warning": bool(unknown or len(set(y_true)) != len(known)),
     }
