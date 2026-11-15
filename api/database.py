@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 
 SCHEMA = "cybersentinel"
 EVENT_TABLES = {"agent2_inference_events","flow_analysis_events","replay_decisions","replay_policies","replay_correlation_groups","analysis_runs"}
-EMAIL_RE = re.compile(r"^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 TOKEN_TTL_SECONDS = 43200
 class AuthError(Exception): pass
 
@@ -54,7 +54,7 @@ def verify_token(token):
     except Exception as exc:raise AuthError("Invalid or expired session.") from exc
 def register_user(email,password):
     email=email.strip().lower()
-    if len(email)>254 or not re.fullmatch(r"[^\\s@]+@[^\\s@]+\\.[^\\s@]+",email):raise ValueError("Enter a valid email address.")
+    if len(email)>254 or not EMAIL_RE.fullmatch(email):raise ValueError("Enter a valid email address.")
     if len(password)<8 or len(password)>128:raise ValueError("Password must be between 8 and 128 characters.")
     try:
         with connect() as conn:row=conn.execute("INSERT INTO users(email,password_hash) VALUES(%s,%s) RETURNING id,email,created_at",(email,_hash_password(password))).fetchone()
@@ -67,13 +67,21 @@ def login_user(email,password):
     with connect() as conn:
         conn.execute("DELETE FROM auth_rate_limits WHERE attempted_at < now() - interval '1 day'")
         attempts=conn.execute("SELECT count(*) AS attempts FROM auth_rate_limits WHERE email_hash=%s AND attempted_at > now() - interval '15 minutes'",(email_hash,)).fetchone()['attempts']
-        if attempts >= 10: raise AuthError('Too many sign-in attempts. Wait 15 minutes and try again.')
-        conn.execute('INSERT INTO auth_rate_limits(email_hash) VALUES(%s)',(email_hash,))
-        row=conn.execute('SELECT id,email,password_hash,created_at FROM users WHERE email=%s AND is_active=true',(email,)).fetchone()
-        if not row or not _password_matches(password,row['password_hash']): raise AuthError('Email or password is incorrect.')
+        if attempts >= 10:
+            too_many=True
+            row=None
+        else:
+            too_many=False
+            conn.execute('INSERT INTO auth_rate_limits(email_hash) VALUES(%s)',(email_hash,))
+            row=conn.execute('SELECT id,email,password_hash,created_at FROM users WHERE email=%s AND is_active=true',(email,)).fetchone()
+    # Exit the transaction before raising so failed attempts are committed.
+    if too_many: raise AuthError('Too many sign-in attempts. Wait 15 minutes and try again.')
+    if not row or not _password_matches(password,row['password_hash']): raise AuthError('Email or password is incorrect.')
+    with connect() as conn:
         conn.execute('DELETE FROM auth_rate_limits WHERE email_hash=%s',(email_hash,))
     user={'id':str(row['id']),'email':row['email'],'created_at':row['created_at'].isoformat()}
     return {'user':user,'access_token':_sign_token(user),'token_type':'bearer','expires_in':TOKEN_TTL_SECONDS}
+
 
 def current_user_from_request(request):
     auth=request.headers.get("authorization","")
