@@ -12,6 +12,7 @@ The complete local data path was exercised with real, research-use network-flow 
 - CIC-IDS2017: import, profile, Random Forest training, held-out evaluation, a second-shard evaluation, detection, and both CSV exports all succeeded.
 - UNSW-NB15: import, profile, Random Forest training, and second-shard evaluation all succeeded.
 - Public Vercel: actual multipart/JSON POSTs to every workspace write family returned the intended `403` with an explicit message that uploads and training are disabled on the serverless demo.
+- Local persistence: after a clean install from the merged repository, a dataset was uploaded and a model trained; the API process was stopped and restarted. Dataset metadata, the experiment registry, model artifact, and exports remained available. Detection after restart returned 200 for all 160 rows and the exported prediction file returned 200.
 
 This is a software integration validation, not a claim that the resulting models are production IDS models.
 
@@ -94,4 +95,4 @@ The public POST checks used real HTTP requests with multipart uploads or JSON bo
 1. CIC-IDS2017 and UNSW-NB15 have now both been exercised end-to-end. ToN-IoT, Bot-IoT, CSE-CIC-IDS2018, and CICIoT2023 still need their own source-specific benchmark runs.
 2. These experiments use deterministic samples of public mirror conversions. For publication-grade results, repeat with the original provider archives and official split files; use day/host-separated evaluation and duplicate/leakage audits.
 3. The public Vercel deployment is a read-only demo by design. Persistent uploads, model artifacts, and experiment history belong on the local machine or another persistent host. Do not enable write endpoints on Vercel's ephemeral filesystem.
-4. The initial broad `ruff check src api scripts tests` surfaced pre-existing lint findings across legacy modules. The existing CI workflows and 180-test suite passed; lint cleanliness is not claimed by this report.
+4. The initial broad `ruff check src api scripts tests` surfaced pre-existing lint findings across legacy modules. The merged branch's test suite passed **181 tests** (1 existing Starlette/httpx deprecation warning); frontend build passed.
