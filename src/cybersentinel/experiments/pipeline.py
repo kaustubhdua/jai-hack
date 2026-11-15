@@ -189,6 +189,12 @@ def train_experiment(
         raise ValueError(f"Training label column {config.label_column!r} is missing.")
     columns = _features(training, config)
     X = training[columns].apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    X = X.loc[:, X.notna().any(axis=0)]
+    columns = list(X.columns)
+    if not columns:
+        raise ValueError("Every selected training feature is empty or non-finite.")
+    if len(training) < 2:
+        raise ValueError("At least two training rows are required.")
     estimator = _build_estimator(config, config.model != "isolation_forest")
     labels = None
     if config.model == "isolation_forest":
