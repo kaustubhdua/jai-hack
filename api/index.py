@@ -32,7 +32,6 @@ from cybersentinel.replay import ReplayEngine
 from cybersentinel.replay.submission import SubmissionValidator
 from cybersentinel.replay.input_validation import validate_replay_input
 from cybersentinel.storage.history_db import list_runs, record_run
-from api.database import AuthError, database_configured, current_user_from_request, register_user, login_user, insert_rows, select_rows, list_user_history
 import pandas as pd
 from api.evaluation import router as evaluation_router
 
@@ -91,38 +90,6 @@ def get_pipeline() -> CyberSentinelPipeline | None:
     return _pipeline
 
 
-@app.post("/api/auth/signup")
-def auth_signup(payload: dict[str, Any]):
-    if not database_configured():
-        raise HTTPException(status_code=503, detail={"code":"DATABASE_NOT_CONFIGURED","message":"Account service is not configured."})
-    try:
-        return register_user(str(payload.get("email","")), str(payload.get("password","")))
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"code":"SIGNUP_REJECTED","message":str(exc)})
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail={"code":"SIGNUP_UNAVAILABLE","message":f"Account creation failed ({type(exc).__name__})."})
-
-
-@app.post("/api/auth/login")
-def auth_login(payload: dict[str, Any]):
-    if not database_configured():
-        raise HTTPException(status_code=503, detail={"code":"DATABASE_NOT_CONFIGURED","message":"Account service is not configured."})
-    try:
-        return login_user(str(payload.get("email","")), str(payload.get("password","")))
-    except AuthError as exc:
-        raise HTTPException(status_code=401, detail={"code":"INVALID_CREDENTIALS","message":str(exc)})
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail={"code":"LOGIN_UNAVAILABLE","message":f"Sign-in is unavailable ({type(exc).__name__})."})
-
-
-@app.get("/api/auth/me")
-def auth_me(request: Request):
-    user_id = _require_authenticated_user(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail={"code":"AUTH_REQUIRED","message":"Sign in to continue."})
-    return {"user": request.state.cybersentinel_user}
-
-
 @app.get("/")
 @app.get("/api")
 @app.get("/health")
@@ -155,8 +122,7 @@ def health():
 
 @app.get("/api/system/diagnostics")
 def system_diagnostics(request: Request):
-    """Expose actual local artifact presence only to an authenticated analyst."""
-    _require_authenticated_user(request)
+    """Expose actual local artifact presence to any public workspace visitor."""
     dataset_candidates = (BASE_DIR / "data" / "processed" / "hidden_replay_input.csv", BASE_DIR / "data" / "processed" / "hidden_replay_input.parquet")
     dataset = next((path for path in dataset_candidates if path.is_file()), dataset_candidates[-1])
     history_db = BASE_DIR / "data" / "cybersentinel_history.db"
@@ -198,7 +164,6 @@ def system_diagnostics(request: Request):
         },
         "submission_artifacts": files,
         "history_database": {"present": history_db.is_file(), "persistent": not SERVERLESS_RUNTIME, "mode": "ephemeral" if SERVERLESS_RUNTIME else "local_sqlite"},
-        "neon_postgres": {"configured": _database_persistence_configured(), "auth": "required" if _database_persistence_configured() else "not_configured", "schema": "cybersentinel", "tables": ["analysis_runs", "agent2_inference_events", "flow_analysis_events", "replay_runs", "replay_decisions", "replay_policies", "replay_correlation_groups"]},
         "source_identity": "literal observed source IP only; missing or invalid endpoint values remain unknown and never become synthetic identities",
         "firewall": {"mode": "simulated-only", "host_firewall_modified": False},
     }
@@ -206,18 +171,19 @@ def system_diagnostics(request: Request):
 
 @app.get("/api/history")
 def get_history(request: Request, limit: int = 15):
-    """Retrieve the authenticated user's private replay and evaluation history."""
-    user_id = _require_authenticated_user(request)
-    if not user_id:
-        try:
-            runs = list_runs(limit=limit)
-            return {"runs": [{**run, "run_id": run.get("id")} for run in runs], "evaluation_runs": [], "source": "local_sqlite"}
-        except Exception:
-            return {"runs": [], "evaluation_runs": [], "source": "local_sqlite"}
+    """Return local SQLite history; hosted serverless runs are intentionally stateless."""
+    if limit < 1 or limit > 50:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 50.")
+    if SERVERLESS_RUNTIME:
+        return {"runs": [], "evaluation_runs": [], "source": "stateless_serverless", "persistent": False,
+                "message": "Replay history is stored only when running locally; this hosted function has no external database."}
     try:
-        return list_user_history(user_id, limit)
+        runs = list_runs(limit=limit)
+        return {"runs": [{**run, "run_id": run.get("id")} for run in runs],
+                "evaluation_runs": [], "source": "local_sqlite", "persistent": True}
     except Exception as exc:
-        raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": f"History database unavailable ({type(exc).__name__})."})
+        return {"runs": [], "evaluation_runs": [], "source": "local_sqlite", "persistent": True,
+                "message": f"Local history is unavailable ({type(exc).__name__})."}
 
 
 @app.get("/api/models/status")
@@ -283,53 +249,17 @@ def get_anomaly_agent() -> AnomalyDetectionAgent | None:
     return _anomaly_agent
 
 
-def _database_user_id(request: Request) -> tuple[str | None, str | None]:
-    cached = getattr(request.state, "cybersentinel_user", None)
-    if cached:
-        return cached["id"], None
-    if not database_configured():
-        return None, "database_not_configured"
-    try:
-        user = current_user_from_request(request)
-        request.state.cybersentinel_user = user
-        return user["id"], None
-    except AuthError as exc:
-        return None, str(exc)
-
-
-def _require_authenticated_user(request: Request) -> str | None:
-    if not _database_persistence_configured():
-        if SERVERLESS_RUNTIME:
-            raise HTTPException(status_code=503, detail={"code": "DATABASE_NOT_CONFIGURED", "message": "Neon Postgres and AUTH_SECRET must be configured."})
-        return None
-    user_id, error = _database_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": error or "Sign in to continue."})
-    return user_id
-
-
 def _database_insert_rows(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
-    user_id, error = _database_user_id(request)
-    if not user_id:
-        return {"stored": False, "reason": error or "not_authenticated"}
-    try:
-        return insert_rows(table, rows, user_id)
-    except Exception as exc:
-        return {"stored": False, "reason": f"database_error_{type(exc).__name__}"}
+    """Cloud audit persistence is deliberately disabled; never contact an external database."""
+    return {"stored": False, "reason": "cloud_database_removed", "mode": "stateless"}
 
 
 def _database_select_rows(table: str, query: str, request: Request) -> dict[str, Any]:
-    user_id, error = _database_user_id(request)
-    if not user_id:
-        return {"stored": False, "reason": error or "not_authenticated", "rows": []}
-    try:
-        return select_rows(table, query, user_id)
-    except Exception as exc:
-        return {"stored": False, "reason": f"database_error_{type(exc).__name__}", "rows": []}
+    return {"stored": False, "reason": "cloud_database_removed", "rows": []}
 
 
 def _database_persistence_configured() -> bool:
-    return database_configured()
+    return False
 
 
 def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, source: str = "agent2_independent") -> dict[str, Any]:
@@ -461,14 +391,9 @@ def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any],
     return _database_insert_rows("replay_runs", [record], request)
 
 
-def _database_persistence_configured() -> bool:
-    return database_configured()
-
-
 @app.post("/api/agents/anomaly/score")
 def score_anomaly(payload: dict[str, Any], request: Request):
     """Run Agent 2 independently without requiring Agent 1 or evidence fusion."""
-    _require_authenticated_user(request)
     agent = get_anomaly_agent()
     if agent is None:
         raise HTTPException(
@@ -614,8 +539,8 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
         for group in engine.correlation_agent.active_groups.values()
     ]
 
-    # Hosted runs must use Neon Postgres as the durable source of truth. SQLite is
-    # retained only for local development and is never written on Vercel.
+    # Local runs are recorded in SQLite. Serverless functions remain stateless:
+    # their filesystem is ephemeral, so no cloud database or fake persistence is used.
     run_id = f"RUN-{time.time_ns()}"
     metrics = results["metrics"]
     if not SERVERLESS_RUNTIME:
@@ -656,7 +581,7 @@ def run_official_replay(request: Request):
     if SERVERLESS_RUNTIME:
         raise HTTPException(status_code=503, detail={
             "code": "OFFICIAL_REPLAY_REQUIRES_ARTIFACT_STORAGE",
-            "message": "Official replay is not enabled in the hosted runtime until verified model/input artifacts and durable submission storage are provisioned. Use the reproducible offline runner; hosted audit history remains in Neon Postgres.",
+            "message": "Official replay is available in the local/offline runtime only. The hosted function has ephemeral storage; use the reproducible offline runner for organizer files and durable submission artifacts.",
         })
     pipeline = get_pipeline()
     if pipeline is None:
@@ -1100,7 +1025,7 @@ def get_policies(request: Request, limit: int = 50, offset: int = 0):
     if _database_persistence_configured():
         latest = _database_select_rows("replay_runs", "select=run_id&order=created_at.desc&limit=1", request)
         if not latest["stored"]:
-            return {"policies": [], "total": 0, "source": "neon_postgres", "error": latest["reason"]}
+            return {"policies": [], "total": 0, "source": "disabled_cloud_persistence", "error": latest["reason"]}
         if not latest["rows"]:
             return {"policies": [], "total": 0, "source": "neon_postgres"}
         run_id = latest["rows"][0]["run_id"]
@@ -1206,7 +1131,7 @@ def get_correlation_groups(request: Request, limit: int = 20):
         result = _database_select_rows("replay_correlation_groups", query, request)
         if not result["stored"]:
             raise HTTPException(status_code=503, detail={"code": "DATABASE_READ_FAILED", "message": result["reason"]})
-        return {"groups": result["rows"], "total": len(result["rows"]), "source": "neon_postgres_latest_replay", "synthetic": False}
+        return {"groups": result["rows"], "total": len(result["rows"]), "source": "latest_completed_replay", "synthetic": False}
     return {
         "groups": _LAST_CORRELATION_GROUPS[:limit],
         "total": len(_LAST_CORRELATION_GROUPS),
