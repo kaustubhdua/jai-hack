@@ -248,140 +248,6 @@ def get_anomaly_agent() -> AnomalyDetectionAgent | None:
     return _anomaly_agent
 
 
-def _stateless_storage_status(table: str, rows: list[dict[str, Any]], request: Request) -> dict[str, Any]:
-    """Hosted persistence is intentionally disabled; this API never contacts an external database."""
-    return {"stored": False, "reason": "hosted_persistence_disabled", "mode": "stateless"}
-
-
-def _persist_agent2_event(result: AnomalyDetectionResult, request: Request, source: str = "agent2_independent") -> dict[str, Any]:
-    """Describe that cloud event persistence is disabled; raw network-flow contents stay local."""
-    payload = result.to_dict()
-    if payload.get("status") != "success" or payload.get("anomaly_score") is None or payload.get("is_anomaly") is None:
-        return {"stored": False, "reason": "unsuccessful_inference"}
-    record = {
-        "source": source,
-        "model_version": str((_anomaly_agent.metadata if _anomaly_agent else {}).get("algorithm", "IsolationForest")),
-        "anomaly_score": float(payload["anomaly_score"]),
-        "is_anomaly": bool(payload["is_anomaly"]),
-        "feature_count": len(_anomaly_agent.feature_columns) if _anomaly_agent else 0,
-        "evidence": payload.get("evidence") or [],
-        "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
-    }
-    return _stateless_storage_status("agent2_inference_events", [record], request)
-
-
-def _persist_flow_events(results: list[dict[str, Any]], request: Request, source: str) -> dict[str, Any]:
-    records = []
-    agent2_records = []
-    for result in results:
-        threat = result.get("threat_detection") or {}
-        anomaly = result.get("anomaly_detection") or {}
-        records.append({
-            "source": source,
-            "record_id": str(result.get("record_id")) if result.get("record_id") is not None else None,
-            "predicted_class": threat.get("predicted_class"),
-            "anomaly_score": anomaly.get("anomaly_score"),
-            "is_anomaly": anomaly.get("is_anomaly"),
-            "final_class": result.get("final_class"),
-            "evidence_status": result.get("evidence_status"),
-            "action": result.get("action"),
-            "rationale": result.get("rationale") or [],
-            "latency_ms": result.get("latency_ms"),
-        })
-        if anomaly.get("anomaly_score") is not None and anomaly.get("is_anomaly") is not None:
-            agent2_records.append({
-                "source": "pipeline_analysis",
-                "model_version": "IsolationForest",
-                "anomaly_score": float(anomaly["anomaly_score"]),
-                "is_anomaly": bool(anomaly["is_anomaly"]),
-                "feature_count": len(_anomaly_agent.feature_columns) if _anomaly_agent else 0,
-                "evidence": anomaly.get("evidence") or [],
-                "request_metadata": {"runtime": "vercel" if SERVERLESS_RUNTIME else "local"},
-            })
-    flow_status = {"stored": True, "rows": 0} if not records else _stateless_storage_status("flow_analysis_events", records, request)
-    for offset in range(0, len(agent2_records), 100):
-        status = _stateless_storage_status("agent2_inference_events", agent2_records[offset:offset + 100], request)
-        if not status.get("stored"):
-            return {"stored": False, "flow_events": flow_status, "agent2_events": status}
-    return {"stored": bool(flow_status.get("stored")), "flow_events": flow_status, "agent2_rows": len(agent2_records)}
-
-
-def _persist_replay_artifacts(results: dict[str, Any], run_id: str, request: Request, correlation_groups: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Persist derived decisions and defensive policies, never the raw flow feature rows."""
-    classification = results.get("classification_rows") or []
-    replay = results.get("replay_rows") or []
-    if len(classification) != len(replay):
-        return {"stored": False, "reason": "replay_output_row_mismatch"}
-    decisions = []
-    for index, (classified, decision) in enumerate(zip(classification, replay), start=1):
-        try:
-            decisions.append({
-                "run_id": run_id,
-                "record_id": str(classified["record_id"]),
-                "seq": index,
-                "predicted_class": str(classified["predicted_class"]),
-                "anomaly_score": float(classified["anomaly_score"]),
-                "evidence_status": str(classified["evidence_status"]),
-                "action": str(decision["action"]),
-                "active_policy_id": str(decision["active_policy_id"]),
-            })
-        except (KeyError, TypeError, ValueError):
-            return {"stored": False, "reason": "invalid_replay_output"}
-    policies = []
-    for policy in results.get("policy_rows") or []:
-        policies.append({
-            "run_id": run_id,
-            "policy_id": str(policy["policy_id"]),
-            "activated_after_record_id": str(policy["activated_after_record_id"]),
-            "scope_type": str(policy["scope_type"]),
-            "scope_value": str(policy["scope_value"]),
-            "expires_after_record_id": str(policy["expires_after_record_id"]),
-        })
-    for offset in range(0, len(decisions), 250):
-        outcome = _stateless_storage_status("replay_decisions", decisions[offset:offset + 250], request)
-        if not outcome.get("stored"):
-            return {"stored": False, "decisions": outcome, "policies_saved": 0}
-    if policies:
-        outcome = _stateless_storage_status("replay_policies", policies, request)
-        if not outcome.get("stored"):
-            return {"stored": False, "decisions_saved": len(decisions), "policies": outcome}
-    groups = []
-    for group in correlation_groups or []:
-        groups.append({
-            "run_id": run_id,
-            "group_id": str(group["group_id"]),
-            "attack_type": str(group.get("attack_type") or "UNKNOWN"),
-            "source_identity": group.get("source_identity"),
-            "target_endpoints": group.get("target_endpoints") or [],
-            "member_record_ids": group.get("member_record_ids") or [],
-            "flow_count": int(group.get("flow_count") or 0),
-            "start_record_id": group.get("start_record_id"),
-            "end_record_id": group.get("end_record_id"),
-            "confidence": float(group["confidence"]) if group.get("confidence") is not None else None,
-            "evidence": group.get("evidence") or [],
-        })
-    if groups:
-        outcome = _stateless_storage_status("replay_correlation_groups", groups, request)
-        if not outcome.get("stored"):
-            return {"stored": False, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups": outcome}
-    return {"stored": True, "decisions_saved": len(decisions), "policies_saved": len(policies), "correlation_groups_saved": len(groups)}
-
-
-def _persist_replay_run(run_id: str, dataset_name: str, metrics: dict[str, Any], status: str, request: Request, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-    record = {
-        "run_id": run_id, "dataset_name": dataset_name,
-        "total_records": int(metrics.get("total_records", 0)),
-        "blocked_records": int(metrics.get("blocked_records", 0)),
-        "allowed_records": int(metrics.get("allowed_records", 0)),
-        "policies_created": int(metrics.get("policies_created", 0)),
-        "containment_rate": metrics.get("containment_rate"),
-        "throughput_fps": metrics.get("throughput_fps"),
-        "elapsed_seconds": metrics.get("elapsed_seconds"),
-        "status": status, "metadata": metadata or {},
-    }
-    return _stateless_storage_status("replay_runs", [record], request)
-
-
 @app.post("/api/agents/anomaly/score")
 def score_anomaly(payload: dict[str, Any], request: Request):
     """Run Agent 2 independently without requiring Agent 1 or evidence fusion."""
@@ -398,7 +264,6 @@ def score_anomaly(payload: dict[str, Any], request: Request):
     if result.status != "success":
         raise HTTPException(status_code=422, detail={"code": "AGENT_2_SCORING_ERROR", "message": result.message or "Anomaly scoring failed."})
     response = result.to_dict()
-    response["storage_status"] = _persist_agent2_event(result, request)
     return response
 
 
@@ -424,7 +289,6 @@ def analyze(payload: dict[str, Any], request: Request):
     threat_metadata = getattr(threat_model, "metadata", {}) or {}
     if flow.get("record_id") is not None:
         analysis["record_id"] = str(flow["record_id"])
-    analysis["storage_status"] = _persist_flow_events([analysis], request, "single_flow")
     analysis["model_provenance"] = {
         "a1_confidence_calibrated": bool(threat_metadata.get("confidence_calibrated", False)),
         "a2_score_is_probability": False,
@@ -448,8 +312,7 @@ def analyze_batch(payload: BatchAnalyzeRequest, request: Request):
     for result, flow in zip(results, payload.flows):
         if flow.get("record_id") is not None:
             result["record_id"] = str(flow["record_id"])
-    persistence = _persist_flow_events(results, request, "batch_replay")
-    return {"total_analyzed": len(results), "actions": actions, "results": results, "storage_status": persistence}
+    return {"total_analyzed": len(results), "actions": actions, "results": results}
 
 
 @app.post("/api/fusion/simulate")
@@ -471,12 +334,6 @@ def simulate_fusion(payload: dict[str, Any], request: Request):
     anomaly = AnomalyDetectionResult(anomaly_score=float(anomaly_score), is_anomaly=is_anomaly)
     result = EvidenceFusionAgent().fuse(threat, anomaly)
     response = result.to_dict()
-    response["storage_status"] = _stateless_storage_status("flow_analysis_events", [{
-        "source": "fusion_simulation", "predicted_class": predicted,
-        "anomaly_score": float(anomaly_score), "is_anomaly": is_anomaly,
-        "final_class": response.get("final_class"), "evidence_status": response.get("evidence_status"),
-        "action": response.get("action"), "rationale": response.get("rationale") or [],
-    }], request)
     return response
 
 
@@ -543,17 +400,10 @@ def simulate_replay(payload: ReplaySimulationRequest, request: Request):
             elapsed_seconds=metrics["elapsed_seconds"],
             status="COMPLETED",
         )
-    cloud_persistence = _persist_replay_run(run_id, payload.dataset_name, metrics, "COMPLETED", request, {"mode": "supplied_batch_replay"})
-    artifact_persistence = (
-        _persist_replay_artifacts(results, run_id, request, _LAST_CORRELATION_GROUPS)
-        if cloud_persistence.get("stored")
-        else {"stored": False, "reason": "replay_run_not_persisted"}
-    )
-    cloud_persistence["artifacts"] = artifact_persistence
+
 
     return {
         "run_id": run_id,
-        "storage_status": cloud_persistence,
         "metrics": metrics,
         "policies_sample": results["policy_rows"][:20],
         "replay_sample": results["replay_rows"][:30],
@@ -637,21 +487,8 @@ def run_official_replay(request: Request):
                 elapsed_seconds=metrics["elapsed_seconds"],
                 status="COMPLETED" if validation.get("all_valid") else "VALIDATION_FAILED",
             )
-        cloud_persistence = _persist_replay_run(
-            run_id, eval_file.name, metrics,
-            "COMPLETED" if validation.get("all_valid") else "VALIDATION_FAILED",
-            request,
-            {"mode": "official_hidden_replay", "validation_passed": bool(validation.get("all_valid")), "correlation_groups": len(_LAST_CORRELATION_GROUPS)},
-        )
-        artifact_persistence = (
-            _persist_replay_artifacts(results, run_id, request, _LAST_CORRELATION_GROUPS)
-            if cloud_persistence.get("stored")
-            else {"stored": False, "reason": "replay_run_not_persisted"}
-        )
-        cloud_persistence["artifacts"] = artifact_persistence
         summary = {
             "run_id": run_id,
-            "storage_status": cloud_persistence,
             "source": "installed_unlabelled_hidden_replay_input",
             "records_processed": int(metrics["total_records"]),
             "artifacts": {
@@ -800,42 +637,6 @@ def validate_submissions(request: Request):
         raise HTTPException(status_code=422, detail="The evaluation dataset contains duplicate record_id values.")
 
     return SubmissionValidator.validate_submission_bundle(sub_dir, records, source_frame=source)
-
-
-@app.post("/api/evaluation/snapshot")
-def save_evaluation_snapshot(payload: dict[str, Any], request: Request):
-    """Save a provenance-bearing evaluation summary to the caller's private history."""
-    dataset_name = str(payload.get("dataset_name") or "generated-evaluation-reports").strip()[:200]
-    if not dataset_name:
-        raise HTTPException(status_code=422, detail="dataset_name must not be empty.")
-    try:
-        dataset_rows = int(payload.get("dataset_rows", 0))
-        processed_rows = int(payload.get("processed_rows", 0))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="dataset_rows and processed_rows must be integers.")
-    if dataset_rows < 0 or processed_rows < 0 or processed_rows > dataset_rows:
-        raise HTTPException(status_code=422, detail="Evaluation row counts are invalid.")
-    metrics = {}
-    for field in ("accuracy", "macro_f1"):
-        value = payload.get(field)
-        if value is None:
-            metrics[field] = None
-        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 1:
-            raise HTTPException(status_code=422, detail=f"{field} must be between 0 and 1.")
-        else:
-            metrics[field] = float(value)
-    status = str(payload.get("status") or "completed").lower()
-    if status not in {"queued", "running", "completed", "failed"}:
-        raise HTTPException(status_code=422, detail="Invalid evaluation snapshot status.")
-    summary = payload.get("summary") or {}
-    if not isinstance(summary, dict):
-        raise HTTPException(status_code=422, detail="summary must be a JSON object.")
-    record = {
-        "dataset_name": dataset_name, "dataset_rows": dataset_rows, "processed_rows": processed_rows,
-        "status": status, "model_version": str(payload.get("model_version") or "unknown")[:120],
-        "accuracy": metrics["accuracy"], "macro_f1": metrics["macro_f1"], "summary": summary,
-    }
-    return {"storage_status": _stateless_storage_status("analysis_runs", [record], request)}
 
 
 @app.get("/api/overview")
@@ -1076,10 +877,6 @@ def test_policy_prefilter(payload: dict[str, Any], request: Request):
             "status": "NO_MATCHING_POLICY",
             "message": f"No active policy matches source IP {source_ip} at seq {current_step}.",
         }
-    response["storage_status"] = _stateless_storage_status("flow_analysis_events", [{
-        "source": "policy_simulation", "record_id": str(current_step),
-        "action": response["action"], "rationale": [response["status"], response["message"]],
-    }], request)
     return response
 
 
