@@ -46,7 +46,7 @@ The shared-project bootstrap is kept separate from Supabase's global migration h
 - Canonical shared-schema bootstrap: `database/cybersentinel/001_init.sql`.
 - Tenant-integrity hardening: `database/cybersentinel/002_replay_owner_integrity.sql`.
 - Project-local ledger: `cybersentinel.schema_migrations`.
-- Current project-local version: `20261115011500`.
+- Current project-local version: `20261115010413`.
 
 The Supabase migration runner also records subsequent DDL migrations in its project-level migration history; the DDL itself is restricted to `cybersentinel`. The older `supabase/migrations/` files describe the retired, dedicated `jai-hack` project schema and remain as historical migration records. Do not apply those public-schema migrations to `common 1`; use the isolated `database/cybersentinel/` migrations instead.
 
