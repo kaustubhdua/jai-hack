@@ -23,7 +23,6 @@ type FlowResult = {
     message?: string;
   };
   latency_ms?: number;
-  supabase_persistence?: { stored: boolean; rows?: number; reason?: string; flow_events?: { stored: boolean; rows?: number; reason?: string }; agent2_rows?: number };
 };
 
 export function FlowInspector({ modelReady }: { modelReady: boolean }) {
@@ -214,9 +213,7 @@ export function FlowInspector({ modelReady }: { modelReady: boolean }) {
       {result && (
         <div className="dataset-loaded" style={{ marginTop: 18, borderTop: "1px solid var(--line)", paddingTop: 16 }}>
           <div className="empty-inline" style={{ marginBottom: 12 }}>
-            Supabase audit: {result.supabase_persistence?.stored
-              ? "Analysis metadata saved to your private account."
-              : "Analysis completed, but cloud persistence was not confirmed (" + (result.supabase_persistence?.reason ?? "not reported") + ")."}
+            Analysis is stateless. No account or cloud database is used; hosted requests are not retained.
           </div>
           <div className="dataset-facts" style={{ margin: "0 0 16px 0" }}>
             <div>
@@ -319,7 +316,6 @@ type AnomalyResult = {
   evidence: (string | Record<string, unknown>)[];
   status: string;
   message?: string | null;
-  supabase_persistence?: { stored: boolean; backend?: string; reason?: string };
 };
 
 export function Agent2Console({ ready }: { ready: boolean }) {
@@ -408,11 +404,7 @@ export function Agent2Console({ ready }: { ready: boolean }) {
             <div><small>STATUS</small><b>{result.status}</b></div>
           </div>
           <div className="empty-inline" style={{ margin: "10px 0" }}>
-            Supabase audit: {result.supabase_persistence?.stored
-              ? "Score metadata saved to Supabase."
-              : result.supabase_persistence?.reason === "server_secret_not_configured"
-                ? "Scoring succeeded; Supabase server key is not configured in the API environment."
-                : "Score returned; Supabase audit was not confirmed (" + (result.supabase_persistence?.reason ?? "not reported") + ")."}
+            Scoring is stateless. Results are returned to this browser and are not saved to a cloud database.
           </div>
           <b>Feature evidence</b>
           {result.evidence.length ? (
