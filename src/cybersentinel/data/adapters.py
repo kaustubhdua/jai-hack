@@ -125,6 +125,13 @@ def normalize_dataset(
         protocol_map = {"tcp": 6, "udp": 17, "icmp": 1, "icmpv6": 58}
         converted = pd.to_numeric(protocol, errors="coerce")
         normalized["protocol"] = converted.fillna(protocol.astype("string").str.strip().str.casefold().map(protocol_map))
+    for numeric_name in (
+        "flow_duration", "protocol", "source_port", "destination_port",
+        "fwd_packets", "bwd_packets", "fwd_bytes", "bwd_bytes",
+        "flow_bytes_per_second", "flow_packets_per_second",
+    ):
+        if numeric_name in normalized.columns:
+            normalized[numeric_name] = pd.to_numeric(normalized[numeric_name], errors="coerce")
     resolved_label = "label" if "label" in normalized.columns else None
     if label_column and label_column in normalized.columns:
         resolved_label = label_column
