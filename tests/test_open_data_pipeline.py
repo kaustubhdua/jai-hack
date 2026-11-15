@@ -162,3 +162,18 @@ def test_ton_iot_autodetection_precedes_cic_flow_signature(tmp_path):
     assert bundle.dataset_type == "ton-iot"
     assert bundle.label_column == "label"
     assert bundle.frame["label"].tolist() == ["normal", "ddos"]
+
+
+def test_cic_duplicate_flow_header_is_normalized_for_legacy_model():
+    source = pd.DataFrame({
+        "Fwd Header Length": [40.0, 80.0],
+        "Fwd Header Length.1": [20.0, 60.0],
+        "Label": ["BENIGN", "DDoS"],
+    })
+    frame, label, mapping, warnings = normalize_dataset(source, "cic-ids2017")
+
+    assert "Fwd Header Length_duplicated_0" in frame.columns
+    assert frame["Fwd Header Length_duplicated_0"].tolist() == [20.0, 60.0]
+    assert "Fwd Header Length.1" not in frame.columns
+    assert label == "label"
+    assert frame["label"].tolist() == ["BENIGN", "DDoS"]
