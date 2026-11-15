@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Papa from "papaparse";
 import {
   Activity, ArrowRight, ArrowUpRight, Check,
@@ -62,27 +62,7 @@ const BENCHMARK = ["BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN"];
 const formatNumber = (n: number) => new Intl.NumberFormat("en-IN").format(n);
 
 export default function App() {
-  const [authSession, setAuthSession] = useState<any>(null);
-  const [guestMode, setGuestMode] = useState(true);
-  const [authLoading, setAuthLoading] = useState(true);
-  const session = { user: { display_name: authSession?.email ?? (guestMode ? "Guest viewer" : "Local analyst"), email: authSession?.email ?? null } };
-  const [health, setHealth] = useState<Health | null>(null);
-  const [healthLoading, setHealthLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    const token = localStorage.getItem("cybersentinel_access_token");
-    if (!token) { setAuthLoading(false); return; }
-    void apiFetch("/api/auth/me").then(async response => {
-      if (!response.ok) throw new Error("Session expired");
-      const payload = await response.json();
-      if (active) { setAuthSession(payload.user); setGuestMode(false); }
-    }).catch(() => {
-      localStorage.removeItem("cybersentinel_access_token");
-      if (active) { setAuthSession(null); setGuestMode(true); }
-    }).finally(() => { if (active) setAuthLoading(false); });
-    return () => { active = false; };
-  }, []);
+  const session = { user: { display_name: "Local analyst" } };
   const [overview, setOverview] = useState<any>(null);
   const [overviewState, setOverviewState] = useState<"idle" | "loading" | "ready" | "empty" | "error">("loading");
   const [overviewMessage, setOverviewMessage] = useState("");
@@ -107,21 +87,15 @@ export default function App() {
       setHistoryMessage(typeof data.message === "string" ? data.message : "");
     } catch {
       setHistory([]);
-      setHistoryMessage("Private replay history is unavailable. Check the API connection and your account session.");
+      setHistoryMessage("Local replay history is unavailable. Check that the local API is running.");
     } finally {
       setHistoryLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!authSession) {
-      setHistory([]);
-      setHistoryMessage("");
-      setHistoryLoading(false);
-      return;
-    }
     void loadHistory();
-  }, [loadHistory, authSession]);
+  }, [loadHistory]);
 
   const loadOverview = useCallback(async () => {
     setOverviewState("loading");
@@ -164,14 +138,8 @@ export default function App() {
   }, []);
   useEffect(() => {
     void checkHealth();
-    if (!authSession) {
-      setOverview(null);
-      setOverviewState("idle");
-      setOverviewMessage("");
-      return;
-    }
     void loadOverview();
-  }, [checkHealth, loadOverview, authSession]);
+  }, [checkHealth, loadOverview]);
 
   function inspectFile(file?: File) {
     if (!file) return;
@@ -232,15 +200,12 @@ export default function App() {
   const totalLabels = dataset ? Object.values(dataset.labels).reduce((a, b) => a + b, 0) : 0;
   const labelCoverage = totalLabels ? Math.round(knownLabels.reduce((n, l) => n + dataset!.labels[l], 0) / totalLabels * 100) : 0;
 
-  if (authLoading) return <div className="app-shell"><main className="main-content"><div className="page-wrap"><div className="workspace-loading" role="status" aria-live="polite"><span className="workspace-loading-spinner" aria-hidden="true" />Checking secure workspace session…</div></div></main></div>;
-  if (!authSession && !guestMode) return <AuthScreen onGuest={() => setGuestMode(true)} onAuthenticated={user => { setAuthSession(user); setGuestMode(false); }} />;
-
   return <div className="app-shell">
     <ParticleBackdrop />
     {mobileNavOpen && <button type="button" className="mobile-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
     <aside className={"sidebar" + (mobileNavOpen ? " mobile-open" : "")}>
       <div className="brand"><div className="brand-mark"><Shield size={21} /></div><span>CYBERSENTINEL</span></div>
-      <div className="workspace"><div className="workspace-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div><div><b>{authSession ? session.user.display_name : "LOCAL ANALYST"}</b><small>{authSession ? "Secure workspace" : guestMode ? "Public read-only demo" : "Offline workspace"}</small></div><ChevronDown size={14} /></div>
+      <div className="workspace"><div className="workspace-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div><div><b>LOCAL ANALYST</b><small>Public · no account required</small></div><ChevronDown size={14} /></div>
       <div className="nav-label">COMMAND WORKSPACE</div>
       {[
         ["Overview", Gauge],
@@ -253,7 +218,7 @@ export default function App() {
         ["Model Intelligence", Cpu],
         ["Audit & Local History", Database],
         ["Settings & Health", SlidersHorizontal],
-      ].filter(([name]) => !guestMode || name === "Overview" || name === "Five-Agent Architecture").map(([name, Icon]: any) => (
+      ].map(([name, Icon]: any) => (
         <button
           key={name}
           className={"nav-item " + (activeNav === name ? "active" : "")}
@@ -276,8 +241,7 @@ export default function App() {
         </div>
         <div className="profile-row">
           <div className="profile-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
-          <div className="profile-meta"><b>{session.user.display_name}</b><small>{authSession ? "Authenticated Neon Postgres user" : guestMode ? "Guest · read-only access" : "Local analyst session"}</small></div>
-          {authSession && <button className="secondary-btn" onClick={() => { localStorage.removeItem("cybersentinel_access_token"); setAuthSession(null); setGuestMode(true); }} style={{ padding: "5px 8px", fontSize: 10 }}>Sign out</button>}
+          <div className="profile-meta"><b>{session.user.display_name}</b><small>Account-free workspace · local data</small></div>}
         </div>
       </div>
     </aside>
@@ -288,8 +252,7 @@ export default function App() {
         <div className="crumb"><span>Workspace</span><span>/</span><b>{activeNav}</b></div>
         <div className="top-actions">
           <div className="env-pill"><span className="pulse-dot" /> OFFLINE REPLAY MODE</div>
-          {guestMode && <button className="secondary-btn" onClick={() => setGuestMode(false)}>Sign in</button>}
-          <button className="icon-btn" title="Refresh API, replay history and overview" onClick={() => { void checkHealth(); if (!guestMode) { void loadOverview(); void loadHistory(); } }}><RefreshCw size={16} /></button>
+          <button className="icon-btn" title="Refresh API, local history and overview" onClick={() => { void checkHealth(); void loadOverview(); void loadHistory(); }}><RefreshCw size={16} /></button>
           <div className="top-avatar">{session.user.display_name.slice(0,1).toUpperCase()}</div>
         </div>
       </header>
@@ -412,59 +375,32 @@ export default function App() {
               </div>
             </section>
 
-            {!guestMode ? (
             <section className="panel history-panel">
               <div className="panel-head history-head">
                 <div>
-                  <div className="panel-kicker">NEON POSTGRES REPLAY AUDIT TRAIL</div>
-                  <h3>Recent Cloud Replay Runs</h3>
-                  <p>Only your authenticated replay summaries appear here. Unlabelled replay data does not provide accuracy or false-block metrics.</p>
+                  <div className="panel-kicker">LOCAL SQLITE REPLAY HISTORY</div>
+                  <h3>Recent Replay Runs</h3>
+                  <p>Run summaries are saved locally when the backend is running on your computer. The hosted demo is stateless and does not send data to a cloud database.</p>
                 </div>
                 <button className="secondary-btn" onClick={loadHistory}><RefreshCw size={14}/> Refresh</button>
               </div>
               <div className="table-wrap">
                 <table>
-                  <thead>
-                    <tr>
-                      <th>REPLAY RUN</th>
-                      <th>RECORDS</th>
-                      <th>STATUS</th>
-                      <th>BLOCKED</th>
-                      <th>ALLOWED</th>
-                      <th>POLICIES</th>
-                    </tr>
-                  </thead>
+                  <thead><tr><th>REPLAY RUN</th><th>RECORDS</th><th>STATUS</th><th>BLOCKED</th><th>ALLOWED</th><th>POLICIES</th></tr></thead>
                   <tbody>
-                    {historyLoading && <tr><td colSpan={6} className="history-loading" role="status">Loading your private replay history…</td></tr>}
+                    {historyLoading && <tr><td colSpan={6} className="history-loading" role="status">Loading local replay history…</td></tr>}
                     {!historyLoading && history.length === 0 && <tr><td colSpan={6} className="empty-inline">{historyMessage || "No local replay runs recorded yet."}</td></tr>}
                     {history.map(row=>(
                       <tr key={row.run_id}>
-                        <td>{row.dataset_name}</td>
-                        <td>{formatNumber(row.total_records)}</td>
+                        <td>{row.dataset_name}</td><td>{formatNumber(row.total_records)}</td>
                         <td><span className={"tag "+(row.status==="COMPLETED"?"tag-green":"tag-amber")}>{row.status}</span></td>
-                        <td>{formatNumber(row.blocked_records)}</td>
-                        <td>{formatNumber(row.allowed_records)}</td>
-                        <td>{formatNumber(row.policies_created)}</td>
+                        <td>{formatNumber(row.blocked_records)}</td><td>{formatNumber(row.allowed_records)}</td><td>{formatNumber(row.policies_created)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </section>
-            ) : (
-              <section className="panel history-panel">
-                <div className="panel-head">
-                  <div>
-                    <div className="panel-kicker">PUBLIC DEMONSTRATION · READ ONLY</div>
-                    <h3>Explore the CyberSentinel workspace</h3>
-                    <p>This guest session has no access to private replay history, user records, cloud audit trails, or privileged analysis actions.</p>
-                  </div>
-                  <span className="tag tag-green">GUEST MODE</span>
-                </div>
-                <div className="empty-inline">You can explore the illustrative five-agent architecture and inspect a CSV locally in this browser. CSV inspection does not upload the file or run model inference.</div>
-              </section>
-            )}
-          </>
+            </section></>
         )}
 
         {activeNav === "Five-Agent Architecture" && <FiveAgentArchitectureView />}
@@ -491,51 +427,6 @@ export default function App() {
       </div>
     </main>
     </Suspense>
-  </div>;
-}
-
-function AuthScreen({ onGuest, onAuthenticated }: { onGuest: () => void; onAuthenticated: (user: any) => void }) {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true); setError(""); setMessage("");
-    try {
-      const response = await fetch(mode === "signin" ? "/api/auth/login" : "/api/auth/signup", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.detail?.message || "Authentication failed.");
-      localStorage.setItem("cybersentinel_access_token", payload.access_token);
-      onAuthenticated(payload.user);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Authentication failed.");
-    } finally { setBusy(false); }
-  }
-
-  return <div className="app-shell" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
-    <section className="panel dataset-panel" style={{ width: "min(460px, 100%)", padding: 28 }}>
-      <div className="panel-kicker">CYBERSENTINEL · PRIVATE WORKSPACE</div>
-      <h2 style={{ margin: "10px 0" }}>{mode === "signin" ? "Sign in to your workspace" : "Create your analyst account"}</h2>
-      <p style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.6 }}>Accounts are secured by the CyberSentinel API. Your private replay history and audit records are stored in an isolated Neon Postgres database. Network-flow files remain local unless you explicitly submit them for analysis.</p>
-      <form onSubmit={submit} style={{ display: "grid", gap: 12, marginTop: 20 }}>
-        <label style={{ display: "grid", gap: 6, fontSize: 11 }}>Email<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} style={{ padding: 12, borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--text)" }} /></label>
-        <label style={{ display: "grid", gap: 6, fontSize: 11 }}>Password<input type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} minLength={8} maxLength={128} required value={password} onChange={e => setPassword(e.target.value)} style={{ padding: 12, borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--text)" }} /></label>
-        {error && <div className="parse-warning" role="alert">{error}</div>}
-        {message && <div className="empty-inline" role="status">{message}</div>}
-        <button className="primary-btn" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}</button>
-      </form>
-      <button className="secondary-btn" type="button" style={{ width: "100%", justifyContent: "center", marginTop: 14 }} onClick={onGuest}>Explore public demo without signing in</button>
-      <button className="text-btn" style={{ marginTop: 14 }} onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setMessage(""); }}>
-        {mode === "signin" ? "New here? Create an account" : "Already registered? Sign in"}
-      </button>
-    </section>
   </div>;
 }
 
