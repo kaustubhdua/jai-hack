@@ -92,3 +92,57 @@ def test_zeek_conn_header_parser(tmp_path):
     path.write_text("#separator \\x09\n#fields\tts\tid.orig_h\tid.resp_h\n1.0\t192.0.2.1\t198.51.100.1\n", encoding="utf-8")
     frame = load_zeek_conn(path)
     assert frame.iloc[0]["id.orig_h"] == "192.0.2.1"
+
+
+
+def test_unsw_attack_category_takes_precedence_over_binary_label():
+    source = pd.DataFrame({
+        "attack_cat": ["Normal", "DoS", "Exploits"],
+        "label": [0, 1, 1],
+        "sbytes": [10, 20, 30],
+        "sttl": [64, 32, 48],
+    })
+    frame, label, _, _ = normalize_dataset(source, "unsw-nb15")
+    assert label == "label"
+    assert frame["label"].tolist() == ["Normal", "DoS", "Exploits"]
+    assert frame["source_label"].tolist() == [0, 1, 1]
+
+
+def test_secondary_unsw_binary_label_is_not_used_as_a_feature(tmp_path):
+    from cybersentinel.experiments.pipeline import _features
+
+    frame = pd.DataFrame({
+        "label": ["Normal", "DoS", "Normal", "DoS"],
+        "source_label": [0, 1, 0, 1],
+        "sbytes": [10, 100, 12, 110],
+        "sttl": [64, 32, 62, 30],
+    })
+    selected = _features(frame, ExperimentConfig(label_column="label"))
+    assert selected == ["sbytes", "sttl"]
+    manifest = train_experiment(frame, ExperimentConfig(n_estimators=10), tmp_path)
+    assert "source_label" not in manifest["features"]
+
+
+def test_allowlist_rejects_secondary_label_leakage():
+    from cybersentinel.experiments.pipeline import _features
+
+    frame = pd.DataFrame({
+        "label": ["Normal", "DoS"],
+        "source_label": [0, 1],
+        "sbytes": [10, 100],
+    })
+    config = ExperimentConfig(label_column="label", feature_columns=["sbytes", "source_label"])
+    with pytest.raises(ValueError, match="Potential target-label leakage"):
+        _features(frame, config)
+
+
+def test_cross_dataset_coverage_does_not_mislabel_missing_classes_as_domain_shift(tmp_path):
+    train = pd.DataFrame({
+        "f1": [0, 1, 2, 3, 4, 5],
+        "label": ["benign", "benign", "attack", "attack", "scan", "scan"],
+    })
+    target = pd.DataFrame({"f1": [0.1, 0.2], "label": ["benign", "benign"]})
+    train_experiment(train, ExperimentConfig(n_estimators=10), tmp_path)
+    report = evaluate_cross_dataset(tmp_path / "model.joblib", target, "label")
+    assert report["target_class_coverage"]["unobserved_training_classes"] == ["attack", "scan"]
+    assert report["domain_shift_warning"] is False
