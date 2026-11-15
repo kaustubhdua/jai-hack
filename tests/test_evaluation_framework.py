@@ -126,3 +126,40 @@ def test_fusion_comparison_extracts_typed_threat_predictions():
 
     assert report["a1_classification_metrics"]["accuracy"] == 1.0
     assert report["a3_fusion_classification_metrics"]["accuracy"] == 1.0
+
+
+def test_fusion_benchmark_uses_vectorized_agent_interfaces():
+    from types import SimpleNamespace
+    from cybersentinel.evaluation.fusion import evaluate_classifier_vs_fusion
+
+    labels = ["BENIGN", "BRUTE_FORCE", "DOS", "DDOS", "PORT_SCAN"]
+    frame = pd.DataFrame({"label": labels, "Flow Duration": [1, 2, 3, 4, 5]})
+
+    class ThreatAgent:
+        def predict_frame(self, rows):
+            return [
+                SimpleNamespace(predicted_class=label, confidence=0.9)
+                for label in rows["label"]
+            ]
+
+    class AnomalyAgent:
+        def score_frame(self, rows):
+            return [
+                SimpleNamespace(anomaly_score=0.1, is_anomaly=False)
+                for _ in range(len(rows))
+            ]
+
+    class FusionAgent:
+        def fuse(self, threat, anomaly):
+            return SimpleNamespace(
+                final_class=threat.predicted_class,
+                action="ALLOW",
+                evidence_status="AGREE",
+            )
+
+    report = evaluate_classifier_vs_fusion(
+        frame, ThreatAgent(), AnomalyAgent(), FusionAgent()
+    )
+    assert report["summary"]["a1_accuracy"] == 1.0
+    assert report["summary"]["a3_accuracy"] == 1.0
+    assert report["summary"]["net_improvement_percentage"] == 0.0
