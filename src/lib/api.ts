@@ -4,7 +4,7 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   return fetch(input, init);
 }
 
-export async function downloadAuthenticatedFile(path: string, filename: string): Promise<void> {
+export async function downloadFile(path: string, filename: string): Promise<void> {
   const response = await apiFetch(path);
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
