@@ -18,22 +18,22 @@ def test_local_workspace_upload_train_evaluate_detect_and_export(tmp_path, monke
     monkeypatch.setattr(workspace, "STORE", ExperimentStore(tmp_path / "experiments.sqlite3"))
 
     training_csv = (
-        "attack_cat,label,sbytes,sttl,source_ip\\n"
-        "Normal,0,10,64,192.0.2.1\\n"
-        "Normal,0,12,62,192.0.2.2\\n"
-        "DoS,1,100,32,198.51.100.1\\n"
-        "DoS,1,110,30,198.51.100.2\\n"
-        "Normal,0,14,60,192.0.2.3\\n"
-        "DoS,1,120,28,198.51.100.3\\n"
+        "attack_cat,label,sbytes,sttl,source_ip\n"
+        "Normal,0,10,64,192.0.2.1\n"
+        "Normal,0,12,62,192.0.2.2\n"
+        "DoS,1,100,32,198.51.100.1\n"
+        "DoS,1,110,30,198.51.100.2\n"
+        "Normal,0,14,60,192.0.2.3\n"
+        "DoS,1,120,28,198.51.100.3\n"
     )
     target_csv = (
-        "attack_cat,label,sbytes,sttl,source_ip\\n"
-        "Normal,0,15,61,=1+1\\n"
-        "Normal,0,17,59,192.0.2.12\\n"
-        "DoS,1,130,27,198.51.100.11\\n"
-        "DoS,1,140,25,198.51.100.12\\n"
-        "Normal,0,19,57,192.0.2.13\\n"
-        "DoS,1,150,23,198.51.100.13\\n"
+        "attack_cat,label,sbytes,sttl,source_ip\n"
+        "Normal,0,15,61,=1+1\n"
+        "Normal,0,17,59,192.0.2.12\n"
+        "DoS,1,130,27,198.51.100.11\n"
+        "DoS,1,140,25,198.51.100.12\n"
+        "Normal,0,19,57,192.0.2.13\n"
+        "DoS,1,150,23,198.51.100.13\n"
     )
     client = TestClient(app)
     uploaded = client.post(
