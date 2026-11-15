@@ -68,6 +68,8 @@ export default function App() {
     // Clear any legacy account token left by older versions of the app.
     localStorage.removeItem("cybersentinel_access_token");
   }, []);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [healthLoading, setHealthLoading] = useState(true);
   const [overview, setOverview] = useState<any>(null);
   const [overviewState, setOverviewState] = useState<"idle" | "loading" | "ready" | "empty" | "error">("loading");
   const [overviewMessage, setOverviewMessage] = useState("");
