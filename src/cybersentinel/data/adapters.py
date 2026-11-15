@@ -114,9 +114,17 @@ def normalize_dataset(
                 candidate = next((by_key.get(_key(alias)) for alias in aliases if by_key.get(_key(alias)) is not None), None)
         else:
             candidate = next((by_key.get(_key(alias)) for alias in aliases if by_key.get(_key(alias)) is not None), None)
-        if candidate is not None and candidate in normalized.columns and candidate != canonical:
-            if canonical not in normalized.columns:
-                rename[candidate] = canonical
+        if candidate is None or candidate == canonical:
+            continue
+        if canonical == "label" and canonical in normalized.columns:
+            preserved = "source_label"
+            suffix = 2
+            while preserved in normalized.columns or preserved in rename.values():
+                preserved = f"source_label_{suffix}"
+                suffix += 1
+            rename[canonical] = preserved
+        if canonical not in normalized.columns or canonical == "label":
+            rename[candidate] = canonical
     normalized = normalized.rename(columns=rename)
     # CIC flow-duration fields are recorded in microseconds; the shared
     # canonical unit is seconds (UNSW dur and common IoT durations use seconds).
