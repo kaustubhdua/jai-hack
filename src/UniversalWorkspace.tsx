@@ -19,6 +19,9 @@ export default function UniversalWorkspace() {
   const [target, setTarget] = useState("");
   const [experiment, setExperiment] = useState("");
   const [label, setLabel] = useState("label");
+  const [datasetType, setDatasetType] = useState("auto");
+  const [features, setFeatures] = useState("");
+  const [dropColumns, setDropColumns] = useState("");
   const [model, setModel] = useState("random_forest");
   const [mapping, setMapping] = useState("");
   const [integration, setIntegration] = useState("zeek");
@@ -45,7 +48,7 @@ export default function UniversalWorkspace() {
     setBusy(true); setError(""); setResult(null);
     try {
       const body = new FormData(); body.append("file", file);
-      const data = await payload(await apiFetch("/api/workspace/datasets", { method: "POST", body }));
+      const data = await payload(await apiFetch(`/api/workspace/datasets?dataset_type=${datasetType}`, { method: "POST", body }));
       await refresh();
       setSelected(data.dataset_id); setTarget(data.dataset_id); setProfile(data);
     } catch (err) { setError(err instanceof Error ? err.message : "Upload failed."); }
@@ -68,7 +71,11 @@ export default function UniversalWorkspace() {
       if (mapping.trim()) label_mapping = JSON.parse(mapping);
       const data = await payload(await apiFetch("/api/workspace/train", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataset_id: selected, label_column: label, model, label_mapping }),
+        body: JSON.stringify({
+          dataset_id: selected, label_column: label, model, label_mapping,
+          feature_columns: features.trim() ? features.split(",").map(x => x.trim()).filter(Boolean) : null,
+          drop_columns: dropColumns.trim() ? dropColumns.split(",").map(x => x.trim()).filter(Boolean) : null,
+        }),
       }));
       setResult(data); setExperiment(String(data.experiment_id)); await refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Training failed."); }
@@ -122,6 +129,13 @@ export default function UniversalWorkspace() {
         <label className="uw-upload"><FileUp size={20}/><b>{busy ? "Working…" : "Choose dataset file"}</b><span>Files are stored in the local workspace</span>
           <input type="file" accept=".csv,.parquet,.pq,.feather,.arrow" disabled={busy} onChange={e => { void upload(e.target.files?.[0]); e.currentTarget.value = ""; }}/>
         </label>
+        <label className="uw-label">Dataset family</label>
+        <select value={datasetType} onChange={e => setDatasetType(e.target.value)}>
+          <option value="auto">Auto-detect</option><option value="cic-ids2017">CIC-IDS2017</option>
+          <option value="unsw-nb15">UNSW-NB15</option><option value="ton-iot">ToN-IoT</option>
+          <option value="bot-iot">Bot-IoT</option><option value="cse-cic-ids2018">CSE-CIC-IDS2018</option>
+          <option value="ciciot2023">CICIoT2023</option><option value="generic">Generic</option>
+        </select>
         <label className="uw-label">Training dataset</label>
         <select value={selected} onChange={e => setSelected(e.target.value)}><option value="">Select dataset</option>{datasets.map(d=><option key={d.dataset_id} value={d.dataset_id}>{d.original_filename}</option>)}</select>
         <button className="secondary-btn" disabled={!selected || busy} onClick={() => void inspect()}>Inspect selected dataset</button>
@@ -141,6 +155,10 @@ export default function UniversalWorkspace() {
           <option value="isolation_forest">Isolation Forest · unsupervised</option><option value="pytorch_mlp">PyTorch MLP · optional</option>
         </select>
         <label className="uw-label">Label column</label><input value={label} onChange={e => setLabel(e.target.value)} placeholder="label"/>
+        <label className="uw-label">Feature allow-list (comma-separated, optional)</label>
+        <input value={features} onChange={e => setFeatures(e.target.value)} placeholder="Flow Duration, Protocol, Destination Port"/>
+        <label className="uw-label">Drop columns (comma-separated, optional)</label>
+        <input value={dropColumns} onChange={e => setDropColumns(e.target.value)} placeholder="Flow ID, Timestamp, Source IP"/>
         <label className="uw-label">Explicit label mapping (JSON, optional)</label>
         <textarea value={mapping} onChange={e => setMapping(e.target.value)} placeholder={'{"Normal":"BENIGN","DoS":"DOS"}'} rows={3}/>
         <button className="primary-btn" disabled={!selected || busy} onClick={() => void train()}><FlaskConical size={15}/> Train experiment</button>
