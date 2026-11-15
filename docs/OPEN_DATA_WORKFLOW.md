@@ -78,6 +78,26 @@ live networks. Re-train and evaluate for each new dataset; record its source,
 licence, SHA-256, mapping, split strategy, feature schema, random seed, package
 versions, model hash, and report hash.
 
+## Local analyst workspace
+
+Start the API on loopback for personal use:
+
+```bash
+uvicorn api.index:app --host 127.0.0.1 --port 8000
+npm run dev
+```
+
+Open **Universal Data Lab** in the analyst console. Upload CSV/Parquet/Feather,
+inspect the data, choose a model and explicit label mapping, train, then
+evaluate on a separate dataset or run detection and export prediction/alert
+CSVs. Experiment metadata and model hashes are stored in local SQLite/JSON.
+
+Write-capable upload, training, detection and telemetry-ingestion routes are
+disabled on Vercel. The hosted demo is public and account-free, so it must not
+accept arbitrary public training jobs or private telemetry. Run the API locally
+to use the personal workspace. Optional integrations are installed with
+`pip install .[integrations]`; XGBoost and PyTorch are separate extras.
+
 ## Runtime and safety boundaries
 
 - No Supabase, Neon, login, signup, hosted database, or paid API is required.
