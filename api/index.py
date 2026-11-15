@@ -5,14 +5,13 @@ from pathlib import Path
 import io
 import json
 import base64
-import http.client
 import os
 import sys
 import tempfile
 import time
 import zipfile
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse
