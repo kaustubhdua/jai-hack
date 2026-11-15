@@ -100,6 +100,7 @@ class TrainRequest(BaseModel):
     label_mapping: dict[str, str] | None = None
     random_state: int = 42
     n_estimators: int = Field(default=300, ge=10, le=2000)
+    max_depth: int | None = Field(default=None, ge=1, le=100)
     contamination: float = Field(default=0.02, gt=0, le=0.5)
     torch_epochs: int = Field(default=20, ge=1, le=500)
 
@@ -112,7 +113,10 @@ class EvaluateRequest(BaseModel):
 
 
 @router.post("/datasets")
-async def upload_dataset(file: UploadFile = File(...), dataset_type: str = "auto"):
+async def upload_dataset(
+    file: UploadFile = File(...), dataset_type: str = "auto",
+    source_url: str = "", licence: str = "", retrieval_date: str = "", citation: str = "",
+):
     _require_local_workspace()
     suffix = Path(file.filename or "").suffix.casefold()
     if suffix not in ALLOWED_SUFFIXES:
@@ -130,7 +134,11 @@ async def upload_dataset(file: UploadFile = File(...), dataset_type: str = "auto
         bundle, profile = _profile(target, dataset_type)
         metadata = {
             "dataset_id": dataset_id, "original_filename": Path(file.filename or "dataset").name,
-            "bytes": size, "path": str(target), "manifest": bundle.manifest(),
+            "bytes": size, "path": str(target), "manifest": {
+                **bundle.manifest(),
+                "provenance": {"source_url": source_url, "licence": licence,
+                               "retrieval_date": retrieval_date, "citation": citation},
+            },
             "profile": profile,
         }
         (UPLOADS / f"{dataset_id}.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -172,17 +180,24 @@ def train(request: TrainRequest):
     _require_local_workspace()
     path = _dataset_path(request.dataset_id)
     bundle = _load_uploaded_dataset(request.dataset_id)
+    dataset_manifest = bundle.manifest()
+    metadata_path = UPLOADS / f"{request.dataset_id}.json"
+    if metadata_path.is_file():
+        try:
+            dataset_manifest["provenance"] = json.loads(metadata_path.read_text(encoding="utf-8")).get("manifest", {}).get("provenance", {})
+        except (OSError, json.JSONDecodeError):
+            dataset_manifest["provenance"] = {}
     config = ExperimentConfig(
         model=request.model, label_column=request.label_column,
         feature_columns=request.feature_columns, drop_columns=request.drop_columns,
         label_mapping=request.label_mapping, random_state=request.random_state,
-        n_estimators=request.n_estimators, contamination=request.contamination,
-        torch_epochs=request.torch_epochs,
+        n_estimators=request.n_estimators, max_depth=request.max_depth,
+        contamination=request.contamination, torch_epochs=request.torch_epochs,
     )
     experiment_key = uuid4().hex
     output = MODELS / experiment_key
     try:
-        manifest = train_experiment(bundle.frame, config, output, bundle.manifest())
+        manifest = train_experiment(bundle.frame, config, output, dataset_manifest)
         experiment_id = STORE.add(experiment_key, "COMPLETED", manifest)
         manifest["experiment_id"] = experiment_id
         manifest["experiment_key"] = experiment_key
