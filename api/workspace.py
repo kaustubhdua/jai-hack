@@ -240,6 +240,15 @@ def evaluate(request: EvaluateRequest):
     _require_local_workspace()
     model_path, experiment = _experiment_model(request.experiment_id)
     target_bundle = _load_uploaded_dataset(request.dataset_id)
+    training_hash = (
+        experiment.get("manifest", {}).get("dataset", {}).get("source_sha256")
+        if isinstance(experiment.get("manifest"), dict) else None
+    )
+    if training_hash and training_hash == target_bundle.source_sha256:
+        raise HTTPException(
+            status_code=422,
+            detail="Cross-dataset evaluation requires a different source dataset; this file was used to train the selected experiment.",
+        )
     target = target_bundle.frame
     try:
         report = evaluate_cross_dataset(model_path, target, request.label_column, request.label_mapping)
